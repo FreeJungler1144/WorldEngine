@@ -82,56 +82,68 @@ def pad_message(msg: str, alpha: str, base_noise=6, block=8, target_residue=1):
     return prefix + msg + suffix
 
 def make_marker(alpha: str, length: int = 4) -> str:
-    """Choose a secret boundary marker of given length."""
     return ''.join(random.choice(alpha) for _ in range(length))
 
 def extract_message(full: str, marker: str) -> str:
-    """Locate the two markers and return what's between them, ignoring surrounding padding."""
     i = full.find(marker)
     j = full.rfind(marker)
     if i == -1 or j == -1 or j == i:
         raise ValueError("Markers not found - decryption or padding went wrong")
     return full[i + len(marker) : j]
 
-DO_MIRROR = False
+DO_MIRROR = True
+DO_PADDING = False
 
-# ── 5. run it ─────────────────────────────────────────────────────
 def rewind():
     machine.set_key(master_key[:-1])
     machine.reflector.rotate_to_letter(master_key[-1])
 
-
 def enc_dec(msg: str):
-    # 0) pick a fresh hidden marker
-    marker = make_marker(ALPHA, 4)
+    # ── 0) optional padding + marker wrap ─────────────────────────
+    if DO_PADDING:
+        # pick a hidden marker and wrap the message
+        marker = make_marker(ALPHA, 4)
+        wrapped_msg = marker + msg + marker
+        padded_msg = pad_message(wrapped_msg, ALPHA)
+    else:
+        # no marker or padding
+        marker = None
+        padded_msg = msg
 
-    # 1) wrap the real message with markers and pad
-    wrapped = marker + msg + marker
-    wrapped = pad_message(wrapped, ALPHA)
+    # ── 1) normalize into your alphabet ────────────────────────────
+    clean = preprocess_message(padded_msg, ALPHA)
 
-    # 2) normalize into your alphabet
-    clean = preprocess_message(wrapped, ALPHA)
-
-    # 3) encrypt
+    # ── 2) encrypt ─────────────────────────────────────────────────
     rewind()
     cipher = "".join(machine.encypher(ch) for ch in clean)
-
-    # display ciphertext in 8-char blocks
     blocks = [cipher[i:i+8] for i in range(0, len(cipher), 8)]
     print("\nEncrypted:", '  '.join(blocks))
 
-    # 4) decrypt
+    # ── 3) optional inversion ──────────────────────────────────────
+    if DO_MIRROR:
+        cipher_to_decrypt = cipher[::-1]
+        inv_blocks = [cipher_to_decrypt[i:i+8] for i in range(0, len(cipher_to_decrypt), 8)]
+        print("Inverted:", '  '.join(inv_blocks))
+    else:
+        cipher_to_decrypt = cipher
+
+    # ── 4) decrypt ─────────────────────────────────────────────────
     rewind()
-    full_plain = "".join(machine.encypher(ch) for ch in cipher)
+    full_plain = "".join(machine.encypher(ch) for ch in cipher_to_decrypt)
 
-    # 5) extract payload and print
-    try:
-        real = extract_message(full_plain, marker)
-    except ValueError:
-        real = "<ERROR: marker not found>"
+    # ── 5) output ──────────────────────────────────────────────────
+    if DO_PADDING:
+        # extract between the two markers
+        try:
+            real = extract_message(full_plain, marker)
+        except ValueError:
+            real = "<ERROR: marker not found>"
+        print("\nDecrypted:", real.replace("#", " "))
+    else:
+        # no markers to strip—just show the direct plaintext
+        print("\nDecrypted:", full_plain.replace("#", " "))
 
-    print("\nDecrypted:", real.replace("#", " "))
-
+# ── run loop ─────────────────────────────────────────────────────
 while True:
     txt = input("\nMessage to encrypt (blank = quit): ")
     if not txt.strip():
