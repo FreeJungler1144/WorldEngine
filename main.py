@@ -1,7 +1,8 @@
 # main.py
 from __future__ import annotations
 
-import argparse
+import argparse, json
+from pathlib import Path
 from copy import deepcopy
 from dataclasses import dataclass
 from secrets import choice as secure_choice, randbelow
@@ -11,12 +12,12 @@ from debug import Debug
 from inop import Inop
 from keyboard_and_plugboard import Keyboard, Plugboard
 from rotor_and_reflector import Rotor, Reflector
-from suites import CURRENT
 from utilities import (
     get_inop_settings,
     preprocess_message,
     reflector_dict,
     rotor_dict,
+    CURRENT
 )
 
 # ────────────────────────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ class Config:
 
 
 # ────────────────────────────────────────────────────────────────────────
-#  1. Suite loading helpers
+#  1. Suite and JSON loading helpers
 # ────────────────────────────────────────────────────────────────────────
 
 
@@ -67,6 +68,16 @@ def load_suite() -> tuple[str, str, Dict[str, "Rotor"], Dict[str, "Reflector"]]:
         raise SystemExit("❌  No wheels compatible with this suite.")
 
     return suite_name, alphabet, rotor_pool, refl_pool
+
+
+def load_config(path: str | Path) -> dict:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    required = {"suite", "rotors", "reflector", "ring_set",
+                "plugs", "master_key"}
+    missing = required - data.keys()
+    if missing:
+        raise ValueError(f"Missing keys in config: {', '.join(missing)}")
+    return data
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -115,6 +126,42 @@ class MachineContext:
             self.master_key,
         )
         self.alphabet: str = alphabet
+
+    @classmethod
+    def from_config(cls, cfg: dict) -> "MachineContext":
+        """Build a MachineContext from a saved JSON dictionary."""
+        rotor_labels = cfg["rotors"]
+
+        # recreate fresh wheel objects
+        rotor_objs = [deepcopy(rotor_dict[label]) for label in rotor_labels]
+        refl_obj   = deepcopy(reflector_dict[cfg["reflector"]])
+
+        # alphabet is the one baked into any rotor
+        alphabet = rotor_objs[0].alphabet
+
+        # apply notch overrides (if present)
+        notch_map = cfg.get("notch_map", {})
+        for obj, label in zip(rotor_objs, rotor_labels):
+            obj.set_notches(notch_map.get(label, ""))
+
+        # build the actual machine
+        inst = object.__new__(cls)          # bypass __init__
+        inst.alphabet    = alphabet
+        inst.rotor_names = rotor_labels
+        inst.plugs       = cfg["plugs"]
+        inst.ring_set    = cfg["ring_set"]
+        inst.notch_map   = notch_map
+        inst.master_key  = cfg["master_key"]
+
+        inst.machine = Inop(
+            Keyboard(alphabet),
+            Plugboard(cfg["plugs"], alphabet),
+            rotor_objs,
+            refl_obj,
+            cfg["ring_set"],
+            cfg["master_key"],
+        )
+        return inst
 
     # ––– helpers ––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -165,7 +212,7 @@ def pad_message(
 def extract_message(full: str, marker: str) -> str:
     i, j = full.find(marker), full.rfind(marker)
     if i == -1 or j == -1 or i == j:
-        raise ValueError("Markers not found – padding removal failed")
+        raise ValueError("Markers not found - padding removal failed")
     return full[i + len(marker) : j]
 
 
@@ -235,8 +282,10 @@ class CipherPipeline:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Encrypt or decrypt with Inop")
     p.add_argument("-m", "--message", metavar="TEXT", help="Plaintext to encrypt. If omitted, an interactive REPL starts.")
-    p.add_argument("--double-pass", dest="double_pass", choices=["on", "off"], default="on", help="Encrypt‑reverse‑encrypt (on) or classic single pass (off). Default: on")
-    p.add_argument("--padding", dest="padding", choices=["on", "off"], default="off", help="Add random cover traffic and hidden marker. Default: off")
+    p.add_argument("--double-pass", dest="double_pass", choices=["on", "off"], default="on", help="Encrypt, reverse, encrypt (on) or classic single pass (off). Default: on")
+    p.add_argument("--padding", dest="padding", choices=["on", "off"], default="on", help="Add random cover traffic and hidden marker. Default: off")
+    p.add_argument("--config", metavar="FILE", help="Load machine settings from JSON instead of answering prompts.")
+    p.add_argument("--interactive", action="store_true", help="Ignore any JSON file and run the interactive prompt chain.")
     return p.parse_args()
 
 
@@ -248,17 +297,33 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # build configuration from CLI flags
+    #  Where do we get the machine settings?
+    cfg_dict = None
+    cfg_path = Path(args.config) if args.config else Path("inop_config.json")
+
+    if not args.interactive and cfg_path.exists():
+        if args.config:                        # --config FILE  (no question)
+            cfg_dict = load_config(cfg_path)
+        else:                                  # automatic file → ask first
+            ans = input(f"Found '{cfg_path}'.  Load it? (Y/n) ").strip().lower()
+            if ans in {"", "y", "yes"}:
+                cfg_dict = load_config(cfg_path)
+
+    #  Build the MachineContext
+    if cfg_dict:
+        ctx        = MachineContext.from_config(cfg_dict)
+        suite_name = cfg_dict["suite"]
+        alphabet   = ctx.alphabet
+    else:
+        # your original interactive path
+        suite_name, alphabet, rotor_pool, reflector_pool = load_suite()
+        ctx = MachineContext(alphabet, rotor_pool, reflector_pool)
+
+    #  Crypto-pipeline still built exactly the same
     cfg = Config(
         double_pass=(args.double_pass == "on"),
         do_padding=(args.padding == "on"),
     )
-
-    # suite‑specific resources
-    suite_name, alphabet, rotor_pool, reflector_pool = load_suite()
-
-    # machine + pipeline
-    ctx = MachineContext(alphabet, rotor_pool, reflector_pool)
     crypto = CipherPipeline(ctx, cfg)
 
     # one‑shot mode ------------------------------------------------------
