@@ -1,94 +1,93 @@
-# inop.py  ──────────────────────────────────────────────────────────
+# inop.py  ─────────────────────────────────────────────────────────
+from __future__ import annotations
+
 from debug import Debug
 
 debug = Debug()
 debug.disable("encypher")
 
+
 class Inop:
-    """Enigma-like machine with historical stepping (double-step) for 3 rotors, fallback cascade for others."""
-    def __init__(self, kb, pb, rotors, reflector, ring_settings, master_key):
-        self.kb = kb
-        self.pb = pb
-        self.rotors = rotors
-        self.reflector = reflector
-
+    def __init__(
+        self,
+        kb, pb,
+        rotors: list,
+        reflector,
+        ring_settings: list[int],
+        master_key: str
+    ) -> None:
         if len(ring_settings) != len(rotors):
-            raise ValueError("Incorrect ring settings length")
+            raise ValueError("ring_settings length mismatch")
         if len(master_key) != len(rotors) + 1:
-            raise ValueError("Incorrect master key length")
+            raise ValueError("master_key length mismatch")
 
-        # set ring and initial positions
+        self.kb         = kb
+        self.pb         = pb
+        self.rotors     = rotors
+        self.reflector  = reflector
+
         self.set_rings(ring_settings)
         self.set_key(master_key[:-1])
         self.reflector.rotate_to_letter(master_key[-1])
 
-    def set_rings(self, rings):
+    # ── key & ring helpers ──────────────────────────────────────
+
+    def set_rings(self, rings: list[int]) -> None:
+        """Apply ring-stellung offsets (1-based) to every rotor."""
         for rotor, ring in zip(self.rotors, rings):
             rotor.set_ring(ring)
 
-    def set_key(self, key_part):
+    def set_key(self, key_part: str) -> None:
+        """Rotate each rotor to its visible window letter."""
         for rotor, letter in zip(self.rotors, key_part):
             rotor.position = rotor.alphabet.index(letter)
 
-    def _step_rotors(self):
-        # If exactly 3 rotors, apply historical double-stepping
+    # ── stepping logic  ─────────────────────────────────────────
+
+    def _step_rotors(self) -> None:
+        """Advance rotors one key-press according to suite rules."""
+
         if len(self.rotors) == 3:
+            # --- historic 3-rotor double-step -------------------
             left, middle, right = self.rotors
-            # double-step: if middle at notch, step left & middle
-            if left.alphabet[middle.position] in middle.notches:
+
+            # decide which rotors step (two-phase clarity)
+            step_L = middle.alphabet[middle.position] in middle.notches
+            step_M = (step_L or right.alphabet[right.position] in right.notches)
+            step_R = True
+
+            if step_L:
                 left.step()
+            if step_M:
                 middle.step()
-            # normal step of middle when right rotor at notch
-            elif left.alphabet[right.position] in right.notches:
-                middle.step()
-            # always step rightmost
-            right.step()
+            if step_R:
+                right.step()
+
         else:
-            # fallback: simple cascade from rightmost inward
+            # --- generic cascade for 4+ rotors ------------------
             carry = True
             for rotor in reversed(self.rotors):
-                if carry:
-                    carry = rotor.step()
-                else:
+                if not carry:
                     break
+                carry = rotor.step()        # .step() returns bool rollover
+
+    # ── encipher one symbol  ────────────────────────────────────
 
     def encypher(self, letter: str) -> str:
-        try:
-            # 1) step rotors according to historical Enigma rules
-            self._step_rotors()
-            debug.log("stepping", f"Rotor positions {[r.position for r in self.rotors]}")
+        self._step_rotors()
+        debug.log("stepping", f"Rotor pos {[r.position for r in self.rotors]}")
 
-            # 2) keyboard
-            signal = self.kb.forward(letter)
-            debug.log("encypher", f"Keyboard: {letter} -> {signal}")
+        signal = self.kb.forward(letter)
+        signal = self.pb.forward(signal)
 
-            # 3) plugboard in
-            signal = self.pb.forward(signal)
-            debug.log("encypher", f"Plugboard in: {signal}")
+        for rotor in reversed(self.rotors):
+            signal = rotor.forward(signal)
 
-            # 4) forward through rotors (right-to-left)
-            for rotor in reversed(self.rotors):
-                signal = rotor.forward(signal)
-            debug.log("encypher", f"Rotors forward: {signal}")
+        signal = self.reflector.reflect(signal)
 
-            # 5) reflector
-            signal = self.reflector.reflect(signal)
-            debug.log("encypher", f"Reflector: {signal}")
+        for rotor in self.rotors:
+            signal = rotor.backward(signal)
 
-            # 6) backward through rotors (left-to-right)
-            for rotor in self.rotors:
-                signal = rotor.backward(signal)
-            debug.log("encypher", f"Rotors backward: {signal}")
-
-            # 7) plugboard out
-            signal = self.pb.backward(signal)
-            debug.log("encypher", f"Plugboard out: {signal}")
-
-            # 8) keyboard back to letter
-            decrypted_letter = self.kb.backward(signal)
-            debug.log("encypher", f"Output: {decrypted_letter}")
-
-            return decrypted_letter
-        except Exception as e:
-            debug.log("encypher", f"Error: {e}")
-            raise
+        signal = self.pb.backward(signal)
+        out_ch = self.kb.backward(signal)
+        return out_ch
