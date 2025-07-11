@@ -1,23 +1,46 @@
-# utilities.py  ────────────────────────────────────────────────────
+# utilities.py
+from __future__ import annotations
+
+import re
+from typing import Dict, List, Set, Tuple
+
 from rotor_and_reflector import Rotor, Reflector
-import string, re
+
+# ────────────────────────────────────────────────────────────────────────
+#  0. Regex & trivial helpers
+# ────────────────────────────────────────────────────────────────────────
 
 _num_re = re.compile(r"^([A-Za-z]+)(\d+)$")
+SUITE_ROTOR_COUNT = {"LEGACY": 3, "INOP-38": 5, "INOP-60": 10}
+
 
 def ask(prompt: str) -> str:
+    """Read & normalise an operator’s response (uppercase, trimmed)."""
     return input(prompt).strip().upper()
 
+
 def _nat_key(name: str):
+    """Natural‑sort rotor names so I, II, III, …, X, XI, R1, R2, …"""
     m = _num_re.match(name)
     if m:
         prefix, num = m.groups()
         return (0, prefix, int(num))
     return (1, name, 0)
 
-def _rotor_count_for_suite(suite: str) -> int:
-    return {"LEGACY": 3, "INOP-38": 5, "INOP-60": 10}[suite.upper()]
 
-def get_rotor_selection(suite: str, rotor_dict: dict, max_label: int):
+def _rotor_count_for_suite(suite: str) -> int:
+    try:
+        return SUITE_ROTOR_COUNT[suite.upper()]
+    except KeyError:  # pragma: no cover
+        raise ValueError(f"Unknown suite '{suite}'. Expected one of {list(SUITE_ROTOR_COUNT)}")
+
+
+# ────────────────────────────────────────────────────────────────────────
+#  1. Interactive question helpers
+# ────────────────────────────────────────────────────────────────────────
+
+
+def get_rotor_selection(suite: str, rotor_dict: Dict[str, Rotor], max_label: int) -> List[str]:
     need = _rotor_count_for_suite(suite)
     names = sorted({n for n in rotor_dict if n.isupper()}, key=_nat_key)
     print("\nAvailable Rotors:", " ".join(names))
@@ -27,7 +50,8 @@ def get_rotor_selection(suite: str, rotor_dict: dict, max_label: int):
             return sel
         print(f"❌  Need exactly {need} valid rotor names.")
 
-def get_reflector_selection(refl_dict, max_label):
+
+def get_reflector_selection(refl_dict: Dict[str, Reflector], max_label: int) -> Reflector:
     names = sorted({n for n in refl_dict if n.isupper()})
     print("\nAvailable Reflectors: ", ", ".join(names))
     while True:
@@ -36,57 +60,55 @@ def get_reflector_selection(refl_dict, max_label):
             return refl_dict[ref]
         print("❌  Not a valid reflector.")
 
-def validate_pair(pair, valid, used):
-    a, b = pair
-    return len(pair)==2 and a!=b and {a,b}<=valid and not({a,b}&used)
 
-def pair_error(pair, valid, used):
-    a, b = pair
-    if len(pair)!=2:
-        return f"❌ Pair '{pair}' must be exactly 2 characters."
-    if a==b:
-        return f"❌ Pair '{pair}' cannot map to itself."
-    if {a,b}-valid:
-        invalid=({a,b}-valid).pop()
-        return f"❌ Invalid char '{invalid}' in pair '{pair}'."
-    dup=({a,b}&used).pop()
-    return f"❌ Char '{dup}' already used."
+# ––– plugboard helpers –––––––––––––––––––––––––––––––––––––––––––
 
-def get_plugboard(alpha: str, max_label: int) -> list[str]:
+def _validate_pair(pair: str, valid: Set[str], used: Set[str]) -> Tuple[bool, str | None]:
+    a, b = pair
+    if len(pair) != 2:
+        return False, f"❌ Pair '{pair}' must be exactly 2 characters."
+    if a == b:
+        return False, f"❌ Pair '{pair}' cannot map to itself."
+    if {a, b} - valid:
+        invalid = ({a, b} - valid).pop()
+        return False, f"❌ Invalid char '{invalid}' in pair '{pair}'."
+    if {a, b} & used:
+        dup = ({a, b} & used).pop()
+        return False, f"❌ Char '{dup}' already used."
+    return True, None
+
+
+def get_plugboard(alpha: str, max_label: int) -> List[str]:
+    """Return a list of *validated* plugboard pairs (e.g. ["AB", "CD"])."""
     valid = set(alpha)
-    # pick max pairs by mode: legacy=10, INOP-38=15, INOP-60=25
-    if len(alpha) == len(Alpha26):
-        max_pairs = 10
-    elif len(alpha) == len(Alpha38):
-        max_pairs = 15
-    else:
-        max_pairs = 25
+    max_pairs = {26: 10, 38: 15}.get(len(alpha), 25)
 
     print(f"\nPlugboard pairs (≤{max_pairs}, e.g. AB CD EF):")
     while True:
-        used = set()
+        used: Set[str] = set()
         raw = ask("Pairs (Enter for none):")
-        pairs = raw.split()
-
         if not raw:
             return []
 
+        pairs = raw.split()
         if len(pairs) > max_pairs:
             print(f"❌  Too many pairs (max {max_pairs}).")
             continue
 
-        errors = [
-            pair_error(p, valid, used)
-            for p in pairs
-            if not validate_pair(p, valid, used)
-        ]
-        if errors:
-            print(errors[0])
-            continue
+        # validate
+        for p in pairs:
+            ok, err = _validate_pair(p.upper(), valid, used)
+            if not ok:
+                print(err)
+                break
+            used.update(p)
+        else:  # only executes if no break occurred
+            return pairs
 
-        return pairs
 
-def get_ring_settings(count: int, alpha: str, max_label: int) -> list[int]:
+# ––– rings & notches ––––––––––––––––––––––––––––––––––––––––––––
+
+def get_ring_settings(count: int, alpha: str, max_label: int) -> List[int]:
     hi = len(alpha)
     prompt = f"{count} ring settings 1-{hi}:"
     while True:
@@ -95,14 +117,15 @@ def get_ring_settings(count: int, alpha: str, max_label: int) -> list[int]:
             return [int(item) for item in raw]
         print(f"❌  Need exactly {count} numbers in 1–{hi}.")
 
-def get_notches(rotor_names, alpha, max_label):
-        # Legacy rotors already have “engraved” notches — no user input here
-    if len(alpha) == len(Alpha26):
+
+def get_notches(rotor_names: List[str], alpha: str, max_label: int) -> Dict[str, str]:
+    if len(alpha) == len(Alpha26):  # Legacy rotors already have fixed notches
         return {}
 
-    valid, result = set(alpha), {}
-    # up to 3 notches in INOP-38, up to 5 in INOP-60
+    valid = set(alpha)
     max_notches = 5 if len(alpha) == len(Alpha60) else 3
+    result: Dict[str, str] = {}
+
     for name in rotor_names:
         while True:
             s = ask(f"Notches for {name} (0–{max_notches}): ")
@@ -112,53 +135,75 @@ def get_notches(rotor_names, alpha, max_label):
             print(f"❌  0–{max_notches} symbols from alphabet only.")
     return result
 
+
 def get_master_key(alpha: str, length: int, max_label: int) -> str:
-    valid, prompt=set(alpha), f"Master key ({length} chars):"
+    valid = set(alpha)
+    prompt = f"Master key ({length} chars):"
     while True:
-        key=ask(prompt)
-        if len(key)==length and set(key)<=valid:
+        key = ask(prompt)
+        if len(key) == length and set(key) <= valid:
             return key
         print(f"❌ Must be exactly {length} symbols from alphabet.")
 
-def get_inop_settings(suite, alpha, rotor_dict, refl_dict):
-    ml=max(len("Select reflector:"),len("Pairs (Enter for none):"), len("10 ring settings 1-60:"), len("Master key (7 chars):"))
-    need=_rotor_count_for_suite(suite)
-    rotors=get_rotor_selection(suite,rotor_dict,ml)
-    reflector=get_reflector_selection(refl_dict,ml)
-    plugboard=get_plugboard(alpha,ml)
-    needed=_rotor_count_for_suite(suite)
-    rings=get_ring_settings(needed, alpha, ml)
-    notches=get_notches(rotors,alpha,ml)
-    master_key=get_master_key(alpha,need+1,ml)
-    return rotors,reflector,rings,notches,plugboard,master_key
+
+# ––– orchestration –––––––––––––––––––––––––––––––––––––––––––––––
+
+def get_inop_settings(suite: str, alpha: str, rotor_dict: Dict[str, Rotor], refl_dict: Dict[str, Reflector]):
+    """Collect *interactive* settings from the operator and return them in the
+    same tuple format expected by older code. The prompts scale nicely with
+    alphabet / rotor count.
+    """
+
+    ml = max(
+        len("Select reflector:"),
+        len("Pairs (Enter for none):"),
+        len("10 ring settings 1-60:"),
+        len("Master key (7 chars):"),
+    )
+
+    need = _rotor_count_for_suite(suite)
+    rotors = get_rotor_selection(suite, rotor_dict, ml)
+    reflector = get_reflector_selection(refl_dict, ml)
+    plugboard = get_plugboard(alpha, ml)
+    rings = get_ring_settings(need, alpha, ml)
+    notches = get_notches(rotors, alpha, ml)
+    master_key = get_master_key(alpha, need + 1, ml)
+    return rotors, reflector, rings, notches, plugboard, master_key
+
+
+# ────────────────────────────────────────────────────────────────────────
+#  2. Text preprocessing
+# ────────────────────────────────────────────────────────────────────────
+
 
 def preprocess_message(msg: str, alpha: str) -> str:
-    # 1) Normalize case
+    """Upper‑case, replace spaces (→ '#') if supported, and drop non‑alphabet chars."""
     text = msg.upper()
-    if "#" in alpha:
-        text = text.replace(" ", "#")
-    else:
-        text = text.replace(" ", "")
-
-    # Only keep valid alphabet symbols:
+    text = text.replace(" ", "#" if "#" in alpha else "")
     return "".join(ch for ch in text if ch in alpha)
 
-Alpha26="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-Alpha38=Alpha26+"0123456789#/"
-Alpha60=Alpha38+"+-*=()[]{}<>!?@&^%$£€_"
 
-# Legacy
-I   = Rotor("EKMFLGDQVZNTOWYHXUSPAIBRCJ", notches="Q", alphabet=Alpha26)  
-II  = Rotor("AJDKSIRUXBLHWTMCQGZNPYFVOE", notches="E", alphabet=Alpha26)  
-III = Rotor("BDFHJLCPRTXVZNYEIWGAKMUSQO", notches="V", alphabet=Alpha26)   
-IV  = Rotor("ESOVPZJAYQUIRHXLNFTGKDCMWB", notches="J", alphabet=Alpha26)
-V   = Rotor("VZBRGITYUPSDNHLXAWMJQOFECK", notches="Z", alphabet=Alpha26)
-VI  = Rotor("JPGVOUMFYQBENHZRDKASXLICTW", notches="ZM", alphabet=Alpha26) 
+# ────────────────────────────────────────────────────────────────────────
+#  3. Wheel database
+# ────────────────────────────────────────────────────────────────────────
+
+Alpha26 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+Alpha38 = Alpha26 + "0123456789#/"
+Alpha60 = Alpha38 + "+-*=()[]{}<>!?@&^%$£€_"
+
+# Legacy rotors ----------------------------------------------------------
+I   = Rotor("EKMFLGDQVZNTOWYHXUSPAIBRCJ", notches="Q",  alphabet=Alpha26)
+II  = Rotor("AJDKSIRUXBLHWTMCQGZNPYFVOE", notches="E",  alphabet=Alpha26)
+III = Rotor("BDFHJLCPRTXVZNYEIWGAKMUSQO", notches="V",  alphabet=Alpha26)
+IV  = Rotor("ESOVPZJAYQUIRHXLNFTGKDCMWB", notches="J",  alphabet=Alpha26)
+V   = Rotor("VZBRGITYUPSDNHLXAWMJQOFECK", notches="Z",  alphabet=Alpha26)
+VI  = Rotor("JPGVOUMFYQBENHZRDKASXLICTW", notches="ZM", alphabet=Alpha26)
 VII = Rotor("NZJHGRCXMYSWBOUFAIVLPEKQDT", notches="ZM", alphabet=Alpha26)
 
-A = Reflector("EJMZALYXVBWFCRQUONTSPIKHGD", alphabet=Alpha26)        
-B = Reflector("YRUHQSLDPXNGOKMIEBFZCWVJAT", alphabet=Alpha26)            
-C = Reflector("FVPJIAOYEDRZXWGCTKUQSBNMHL", alphabet=Alpha26) 
+# Legacy reflectors ------------------------------------------------------
+A = Reflector("EJMZALYXVBWFCRQUONTSPIKHGD", alphabet=Alpha26)
+B = Reflector("YRUHQSLDPXNGOKMIEBFZCWVJAT", alphabet=Alpha26)
+C = Reflector("FVPJIAOYEDRZXWGCTKUQSBNMHL", alphabet=Alpha26)
 
 #INOPv1
 R1 = Rotor("EUXQ1W3BYF4RK0H7VGPADS59TOIZJL628C#NM/", "", alphabet=Alpha38)
@@ -211,8 +256,9 @@ P = Reflector("V^P_$?8[9X€T!-WC*6<L&AOJ{()/%43£R+GI=17NQ#Z0H>Y@S]MF}UB2E5KD",
 Q = Reflector("#%9£FEP6YX&^U+=G}75)MZ_JIV[(@?<SHR€CA{N!$O1T0>/Q4]-32KLB*D8W", alphabet=Alpha60)
 R = Reflector("9W-L73!V}N+D2J£8%?#/=HB{5&>)MF6Y4EPASTKC€U^1<$XI[0GR_Z(Q]O*@", alphabet=Alpha60)
 
-# First, define your canonical mappings:
-base_rotors = {
+# Build the lookup dicts -------------------------------------------------
+
+base_rotors: Dict[str, Rotor] = {
     "I": I, "II": II, "III": III, "IV": IV, "V": V, "VI": VI, "VII": VII,
     "R1": R1, "R2": R2, "R3": R3, "R4": R4, "R5": R5,
     "R6": R6, "R7": R7, "R8": R8, "R9": R9, "R10": R10,
@@ -222,19 +268,23 @@ base_rotors = {
     "S16": S16, "S17": S17, "S18": S18, "S19": S19, "S20": S20,
 }
 
-base_reflectors = {
+base_reflectors: Dict[str, Reflector] = {
     "A": A, "B": B, "C": C, "D": D, "E": E, "F": F, "G": G, "H": H,
     "AI": AI, "J": J, "K": K, "L": L, "M": M, "N": N, "O": O, "P": P,
     "Q": Q, "R": R,
 }
 
-# Then build your full lookup dicts:
-rotor_dict = {}
+rotor_dict: Dict[str, Rotor] = {}
 for name, obj in base_rotors.items():
-    rotor_dict[name]       = obj   # uppercase key
-    rotor_dict[name.lower()] = obj   # lowercase alias
+    rotor_dict[name] = rotor_dict[name.lower()] = obj  # uppercase + alias
 
-reflector_dict = {}
+reflector_dict: Dict[str, Reflector] = {}
 for name, obj in base_reflectors.items():
-    reflector_dict[name]       = obj
-    reflector_dict[name.lower()] = obj
+    reflector_dict[name] = reflector_dict[name.lower()] = obj
+
+__all__ = [
+    "rotor_dict",
+    "reflector_dict",
+    "get_inop_settings",
+    "preprocess_message",
+]
