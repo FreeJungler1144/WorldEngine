@@ -38,6 +38,27 @@ def _rotor_count_for_suite(suite: str) -> int:
 # ────────────────────────────────────────────────────────────────────────
 #  1. Interactive question helpers
 # ────────────────────────────────────────────────────────────────────────
+Alpha26 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+Alpha38 = Alpha26 + "0123456789#/"
+Alpha60 = Alpha38 + "+-*=()[]{}<>!?@&^%$£€_"
+
+SUITES: Dict[int, Dict[str, str]] = {
+    1: {"name": "Legacy",  "alphabet": Alpha26},
+    2: {"name": "INOP-38", "alphabet": Alpha38},
+    3: {"name": "INOP-60", "alphabet": Alpha60},
+}
+
+def choose_suite(default: int = 1) -> Dict[str, str]:
+    print("\nSelect suite:")
+    for idx, suite in SUITES.items():
+        print(f" [{idx}] {suite['name']}")
+    try:
+        sel = int(input("> ").strip())
+    except ValueError:
+        sel = default
+    return SUITES.get(sel, SUITES[default])
+
+CURRENT = choose_suite()
 
 
 def get_rotor_selection(suite: str, rotor_dict: Dict[str, Rotor], max_label: int) -> List[str]:
@@ -187,10 +208,6 @@ def preprocess_message(msg: str, alpha: str) -> str:
 #  3. Wheel database
 # ────────────────────────────────────────────────────────────────────────
 
-Alpha26 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-Alpha38 = Alpha26 + "0123456789#/"
-Alpha60 = Alpha38 + "+-*=()[]{}<>!?@&^%$£€_"
-
 # Legacy rotors ----------------------------------------------------------
 I   = Rotor("EKMFLGDQVZNTOWYHXUSPAIBRCJ", notches="Q",  alphabet=Alpha26)
 II  = Rotor("AJDKSIRUXBLHWTMCQGZNPYFVOE", notches="E",  alphabet=Alpha26)
@@ -206,16 +223,16 @@ B = Reflector("YRUHQSLDPXNGOKMIEBFZCWVJAT", alphabet=Alpha26)
 C = Reflector("FVPJIAOYEDRZXWGCTKUQSBNMHL", alphabet=Alpha26)
 
 #INOPv1
-R1 = Rotor("EUXQ1W3BYF4RK0H7VGPADS59TOIZJL628C#NM/", "", alphabet=Alpha38)
-R2 = Rotor("HCWGN7LYZ5E/29UXDQ4KS#JR1MP0A6V8TIB3FO", "", alphabet=Alpha38)
-R3 = Rotor("UD8L/G7#RI0Y59PWXNAH1MEFVCZB6K234OQJST", "", alphabet=Alpha38)
-R4 = Rotor("8BHJDT3IEX4RG61/YQ2VFKOMC0#PAWZ7SUN9L5", "", alphabet=Alpha38)
-R5 = Rotor("JSMGCN9RHZ6BO5/XKV7Y80D1UIA24QFWT3PEL#", "", alphabet=Alpha38)
-R6 = Rotor("7L98N6P0D5OMARWI1KEHBTZU#JGV3CXYF4QS/2", "", alphabet=Alpha38)
-R7 = Rotor("TFDIS#JVMLP7QK5XA0O6CE1/GY2U93WRNB8ZH4", "", alphabet=Alpha38)
-R8 = Rotor("DAXJ9EMF1ZYLVW4TBPGI58CHNU/KR7Q32O6#S0", "", alphabet=Alpha38)
-R9 = Rotor("WM#7VHK4J36UGBIA0NYLC/5OF8XDRZ9QS2P1TE", "", alphabet=Alpha38)
-R10 = Rotor("N2SK8#YCMAWL5Q/46D7OXZJFVBUGITP1R930HE", "", alphabet=Alpha38)
+R1 = Rotor("PFEYNJ9TOZ3RW5QD87K2SUA04CM1H6ILGX/B#V", "", alphabet=Alpha38)
+R2 = Rotor("B/4WX83GJMQI7EAT20U56OLP#ZSRDF91KHNYVC", "", alphabet=Alpha38)
+R3 = Rotor("GM27U5HWCKZP0R4OXBVIN813EQDA6FY#9/TJSL", "", alphabet=Alpha38)
+R4 = Rotor("SN4ZO75C#8Q6GJFIYPDHVA0/KT2R39ULM1EWXB", "", alphabet=Alpha38)
+R5 = Rotor("3JO9ZA0E4GFKI6B1XSDNU82TC5Y/PRM7H#LVWQ", "", alphabet=Alpha38)
+R6 = Rotor("09CR1M5K36LJYTSPH7XNI#G2ZV4FEOQ/WAU8DB", "", alphabet=Alpha38)
+R7 = Rotor("CZTBSNHJPGAKIE54Q8YFW9LUV2D3#R1M0X6O7/", "", alphabet=Alpha38)
+R8 = Rotor("3G/CXWU6BYAK7HD5Z428TEIMVFJN0OPS9R#Q1L", "", alphabet=Alpha38)
+R9 = Rotor("IP/69KZSQ05XAD#CR2FVJ3O7Y8TW4NG1BEMHLU", "", alphabet=Alpha38)
+R10 = Rotor("ZV85JFPWEDHT6GQ7X40BMRIY/CAON1UL2S#93K", "", alphabet=Alpha38)
 
 D = Reflector("/VEYCXKR7NG86JS#UHO1QB0FD5WT492ZMIL3PA", alphabet=Alpha38)
 E = Reflector("T5UYKM7V/WE4F1R02O#ACHJ3D9PNQXLB8G6ZSI", alphabet=Alpha38)
@@ -224,37 +241,37 @@ G = Reflector("6CBXSJVKLFHI1WU8RQEZOGND3T9M7Y54A2P0/#", alphabet=Alpha38)
 H = Reflector("LU/015MT642AGQ39NV8HBR#7ZYDEKOJFIXSPWC", alphabet=Alpha38)
 
 # INOPv2
-S1 = Rotor("21S5WE>P}7@V-A8]{£*D6T![€R(L^_C=N&<40XU9YK3ZI?%J$BG#H/FM)+OQ", "", alphabet=Alpha60)
-S2 = Rotor("D^8%*R7AG_{6=#&U[Q!CI)+12HF4/<}Z5NX-]P0TK3@MW9£B€V>S?JL$(EYO", "", alphabet=Alpha60)
-S3 = Rotor("&HK/1U}R9(F#6XA£<03WZJD-{QO45G^€_YC)T]P+*%!=E>?SNMI$VL8@72[B", "", alphabet=Alpha60)
-S4 = Rotor("Q9+E*^>DVS}1K(P$#LOT{7YC_6GJ€HA&8!)N<WZ-£I]?5M/20BX=F@UR%34[", "", alphabet=Alpha60)
-S5 = Rotor("9A86=_R#{/B4MN*-]GF?1P€V+>!XY)C07%5<IWZOSJ^QT}&KDE@$[UH2L£(3", "", alphabet=Alpha60)
-S6 = Rotor("-9[C!X0_KM%@N2S+Y5&O>?QZT<^7/(F{*R])UBWV3ED1G$HIP#£8L=4J}A€6", "", alphabet=Alpha60)
-S7 = Rotor("8G#€>V[39TXZ=IA*}LNE5-0_%7(Q2U^&K£BR?]W@YHCPJDSM${<F)!/+461O", "", alphabet=Alpha60)
-S8 = Rotor("}N]^GBYQ(/KHJFS3=4R1*+C£&@8XIE?PDO9M!A_06V25L)T{[#$<Z%>W7€-U", "", alphabet=Alpha60)
-S9 = Rotor("]QHE)4%<WXY8^FMOP/2*3{_@?70I£V6}G(RBNC-L$!€K#9JU[Z&1+AT=5>DS", "", alphabet=Alpha60)
-S10 = Rotor("XO8?M0H-2U<&F£LIZ75R$*P6}J13WA{)4B%]+9V=#^@NS![TQ(G_D/€E>KYC", "", alphabet=Alpha60)
-S11 = Rotor("8*1X&J3I5Q+}{_E@G0WB!<%LK>FAH92$€()6]ZO^[4-YUD=/7TVR?#SNPC£M", "", alphabet=Alpha60)
-S12 = Rotor("1^4{6N*7X$L&_D[@%)BYP}J3TRAMICS#(2?8<=!OE/9WHK>V]G-5UZ€F£+Q0", "", alphabet=Alpha60)
-S13 = Rotor("=D}V#C8M7/L1KS@0!$Z^Q%R9GJ)W<[&_24-EF?{£3T+P5]ANY6U€*I(BOH>X", "", alphabet=Alpha60)
-S14 = Rotor("L5$W@CF£A?}*D[UJX!3S7(1#)^>&ZY]T4%ER-+<€VM9286=NK0HPBOIG/{Q_", "", alphabet=Alpha60)
-S15 = Rotor("P[O?S€5]RN6(£DE>X&)KV8U#CG-}<+A*@MB0TW7!/Q1L^Y42=%IJ3H{_9FZ$", "", alphabet=Alpha60)
-S16 = Rotor("_€8!C9@£)K=I<24L>O-RJ*NH(Y1T?G#PXQ[{%}FM]BZ0VE&W637$S+A/^5UD", "", alphabet=Alpha60)
-S17 = Rotor("PLGOA#)_(2SI€HV^9U85MR<WE=-47D?*T]0CBZ!@£1}[&$/>%YK{QNX+F6J3", "", alphabet=Alpha60)
-S18 = Rotor("743D{E1W?£}ZR5HQU2P0KM)(9</G_A-[BTY$C>F8#OX=J@€]*6%&I+LN^VS!", "", alphabet=Alpha60)
-S19 = Rotor("[HB96}QJ)W{7V€5@DS+£(<Y>*4/IU#!G$M2Z1E&PKL]0=?3_RNF-TA^%C8OX", "", alphabet=Alpha60)
-S20 = Rotor("SBPR#/V?I=35JKTN4O8E9)17!Y[UH(%Z>*@+_-$]GQ£{026}<LM€^FAWD&XC", "", alphabet=Alpha60)
+S1 = Rotor("X2[IZMGN1=$S{}J*QYC7€0_?R£W%<+V^@#U63K>HAP&4(F9-TOB/D8L!E5)]", "", alphabet=Alpha60)
+S2 = Rotor("K3%9?6£5P$LY}#S_>DVZ<MU/BR]=J(-I!0NAT)W4@&+F*7^E2€HXOQ1C8[{G", "", alphabet=Alpha60)
+S3 = Rotor(">9/A<$ON7ML_S=K&E#][FG3?2UP*T4}H£0JZ8IR+Q1D€6!Y5{-)%(XWC^BV@", "", alphabet=Alpha60)
+S4 = Rotor("$WXCU-*K€9)(6B[1JS7+M/!NQ3@#I><^AGPZ£}D2T_H8R=V{4%E&L5]?Y0OF", "", alphabet=Alpha60)
+S5 = Rotor("{0SY)5<U24DG^/?TJ}LIO_R7£P]=W$Q[*8!>X9@Z(1#B63-C&FVAN€%H+MEK", "", alphabet=Alpha60)
+S6 = Rotor("(&$-A)V13KDS=>PQ*0W_F8U6T£9!?2BO@€MI%J#/+47R^X5E[{H}LYCN<]GZ", "", alphabet=Alpha60)
+S7 = Rotor("&BH]L8%(N2U97/$=€<S?O[>£-JPW4+G5CQF0)K^*!3V_ZYR@{D}#1MTAEIX6", "", alphabet=Alpha60)
+S8 = Rotor("-4YFXE}>7L<WP&%(S£)5OV_60Z$1A*J+I9U?T3=^[/N{B€GK#RDM@8Q2C]!H", "", alphabet=Alpha60)
+S9 = Rotor("C8YSXIF2}3£]&>€O0!@1H*=DU[BZWNRQP-J)E%4M<GT6+A$^?_7L(V{K9/5#", "", alphabet=Alpha60)
+S10 = Rotor("7H=G(/N@8L09?3CY6JT^>[£Q1AFK]U5%)P&OZ$DW€V+MX2I4B{ESR<-!}#_*", "", alphabet=Alpha60)
+S11 = Rotor("AONH5[/Y£@ZE92C_{K?$=<&PGV€>#7W(84S0*!-^ULFR%)JI}X6+31MTQB]D", "", alphabet=Alpha60)
+S12 = Rotor("QNFV$I15%WX{A8*_62YS9K<R>B]L#^}+Z/=JD@GUP£43[€EM7-OC!H0&(?)T", "", alphabet=Alpha60)
+S13 = Rotor("B@(AU1GN£C&9!>JQ/LZ=-43{WRKV[SF5%M$€?E6DH8T^+X}2YIP70O*<])_#", "", alphabet=Alpha60)
+S14 = Rotor("Y5$4S[3TW6%7U?V£0IPH{AF<EKRL2=_>GJZ#B!8&}@NODC^1XM]*9/-+Q(€)", "", alphabet=Alpha60)
+S15 = Rotor("?*%VO)£=A{/K06FT7G$4Y}89URP5H]EC<>^[JBL_QNS@-M!X1IW€Z+D&2(3#", "", alphabet=Alpha60)
+S16 = Rotor("1VB^F7E3>[DL*UZ4%+OCYJ9(_8#)5£X<I&R-{]G}2@N0H?PK/Q!6TS€WMA$=", "", alphabet=Alpha60)
+S17 = Rotor("I6Y_OLKC?A#ZQ0GXHBV51@€-}38U*/>SE=&94£)[M{7$PJ%D(T+R<]!^2NWF", "", alphabet=Alpha60)
+S18 = Rotor("04*=T^(1£29]_-FRIYCG+78BE?K#<€H[O&X/UWA$VPD>S65Z%JL@Q}3)MN!{", "", alphabet=Alpha60)
+S19 = Rotor("J&Z!SYW?G4{KMH0I#TUX]€F2Q/N[D5PV%A9)B^->R_3(7+<L@8=}CO*£61E$", "", alphabet=Alpha60)
+S20 = Rotor("}[!BD2]JV9E35A&8NST£O>)F=G#-/HL@QC^+7<X(0R%*ZP€_MU{1W6Y4$KI?", "", alphabet=Alpha60)
 
-AI = Reflector("?38^$&@€X%£S60VQP*L(/O<I1{NY>B7-M4C=+U#5R9T_}!Z[W2]AGFDJEKH)", alphabet=Alpha60)
-J = Reflector("G#)£-=A20S€[9}&+!^J$ZWV16UIXH@</Y*]MB5PE7F{CL8(N4_Q%3OR?TDK>", alphabet=Alpha60)
-K = Reflector("T<G0}-C?VZ[^#ONY%4$A9I7=PJD8(€R65W1UM_*F+X2{K!)EB@]H>£LQS&3/", alphabet=Alpha60)
-L = Reflector("{@(R+WY<1M4SJ!X^-DL$56FOG[=I*#KUV€}?3]EQ20C%Z/A8H£N9B_P)T>7&", alphabet=Alpha60)
-M = Reflector("DJSAZI£3FB@0)Y%RWPC_?9Q7NEL#=H{[&X*V1<$!82}M5^4(/€-UK6]O+G>T", alphabet=Alpha60)
-N = Reflector("){@WVT>8#4=Q*Z?]L</F%ED^&N-£_9J+!(H3IS50MK7A$PB€RG6OCYXU[1}2", alphabet=Alpha60)
-O = Reflector("L?&U)4M#<]OAGTK%2(5ND3*0@8X=QVFS-_Z>H€{6W1RE$J+!I9}BYC£P[^/7", alphabet=Alpha60)
-P = Reflector("V^P_$?8[9X€T!-WC*6<L&AOJ{()/%43£R+GI=17NQ#Z0H>Y@S]MF}UB2E5KD", alphabet=Alpha60)
-Q = Reflector("#%9£FEP6YX&^U+=G}75)MZ_JIV[(@?<SHR€CA{N!$O1T0>/Q4]-32KLB*D8W", alphabet=Alpha60)
-R = Reflector("9W-L73!V}N+D2J£8%?#/=HB{5&>)MF6Y4EPASTKC€U^1<$XI[0GR_Z(Q]O*@", alphabet=Alpha60)
+AI = Reflector("Z0R9WP]<SOX5^+JF>CI2@7EK3AB)TY6L4V=D_-N/$8?1%G&£HQ€(U{M[*}!#", alphabet=Alpha60)
+J = Reflector("W*2{JGFT1ELKX0+_8^%H£?AM[&NIC$54](Q)@<O}B€79Y6D-/!>V#ZRS3U=P", alphabet=Alpha60)
+K = Reflector("SD/B@€Z*V)1-?X7}9%AW5ITN<G&K6_>U2O#Q8C$LH]^J!=£PY4[ME0(R+{F3", alphabet=Alpha60)
+L = Reflector("G2S_!PAX7{5€93)F@}C&^%[H=<4(BN0K]I/M?8>*-Y1OW6JRZ+E#QTUV£$LD", alphabet=Alpha60)
+M = Reflector("}{0L[Y1&%P9D=4^J+*>€$5!@F)CG-/NV8_6K]3Q2RM<ZE#BA(SW£XHOIU?T7", alphabet=Alpha60)
+N = Reflector("!WM(3L0{74#FC2=UT+}QP>B^9]G_NEJ?$I[YK&R%)OD*8ZHS£VA5€/X-6<@1", alphabet=Alpha60)
+O = Reflector("HI@S>-XABZ3V%7#/8<D5=L£G+J?&)K9T^NQ4OPYF}U{2!€(*RE[0C16M_W]$", alphabet=Alpha60)
+P = Reflector("BA=%YZ^T8-&£7*{W31_H}[P#EF<R+Q$@/MI!X62JNC?]V)OU0€9(5KGD4L>S", alphabet=Alpha60)
+Q = Reflector("N6LW^0HG}T]C(A/5£!2J%*D@$#F€S<=PB_&{ZO>[V4M?-K9I3+R)X8EUYQ17", alphabet=Alpha60)
+R = Reflector("8M(S7!ZKP&H[B%/I=6D<29*+?G@5U>^1REAV-OX#WQC{L_)£T3FY0J4N€}$]", alphabet=Alpha60)
 
 # Build the lookup dicts -------------------------------------------------
 
