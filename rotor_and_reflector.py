@@ -86,5 +86,8 @@ class Reflector:
         mapped = self._map[adjusted]
         return (mapped - self.position) % self.size
 
+    def step(self, n: int = 1) -> None:
+        self.position = (self.position + n) % self.size
+        
     def __repr__(self) -> str:
         return f"<Reflector pos={self.position}>"

@@ -4,7 +4,7 @@ from __future__ import annotations
 from debug import Debug
 
 debug = Debug()
-debug.disable("encypher")
+debug.disable("encipher")
 
 
 class Inop:
@@ -70,6 +70,9 @@ class Inop:
                 if not carry:
                     break
                 carry = rotor.step()        # .step() returns bool rollover
+        
+        if getattr(self, "_step_reflector_flag", False):
+            self.reflector.step()
 
     # ── encipher one symbol  ────────────────────────────────────
 
