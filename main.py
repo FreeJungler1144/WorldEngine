@@ -33,11 +33,12 @@ debug.toggle_global(False)
 class Config:
     """Runtime switches that influence the crypto pipeline."""
 
-    double_pass: bool = True    # encrypt‑reverse‑encrypt if True
-    do_padding: bool = True     # wrap msg with marker + cover traffic
-    block: int = 8              # display / padding block size
-    base_noise: int = 8         # minimum random chars added when padding
-    marker_len: int = 5         # hidden delimiter length
+    double_pass: bool = True        # encrypt‑reverse‑encrypt if True
+    do_padding: bool = True         # wrap msg with marker + cover traffic
+    step_reflector: bool = True    # step reflector on every keypress 
+    block: int = 8                  # display / padding block size
+    base_noise: int = 8             # minimum random chars added when padding
+    marker_len: int = 5             # hidden delimiter length
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -125,6 +126,7 @@ class MachineContext:
             self.ring_set,
             self.master_key,
         )
+        
         self.alphabet: str = alphabet
 
     @classmethod
@@ -193,8 +195,6 @@ def pad_message(
     block: int,
     target_residue: int = 1,
 ) -> str:
-    """Return *msg* surrounded by cover traffic so that
-    `(len(padded_msg) % block) == target_residue`."""
 
     scaled_noise = max(base_noise, int(len(msg) * 0.25))
     residue = (len(msg) + scaled_noise) % block
@@ -228,6 +228,7 @@ class CipherPipeline:
         self.ctx = ctx
         self.cfg = cfg
 
+        self.ctx.machine._step_reflector_flag = cfg.step_reflector
     # ––– public API ––––––––––––––––––––––––––––––––––––––––––––
 
     def encrypt(self, msg: str) -> tuple[str, str | None]:
@@ -286,6 +287,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--padding", dest="padding", choices=["on", "off"], default="on", help="Add random cover traffic and hidden marker. Default: off")
     p.add_argument("--config", metavar="FILE", help="Load machine settings from JSON instead of answering prompts.")
     p.add_argument("--interactive", action="store_true", help="Ignore any JSON file and run the interactive prompt chain.")
+    p.add_argument("--moving-reflector", action="store_true", help="Step the reflector one notch per key-press.")
     return p.parse_args()
 
 
@@ -323,6 +325,7 @@ def main() -> None:
     cfg = Config(
         double_pass=(args.double_pass == "on"),
         do_padding=(args.padding == "on"),
+        step_reflector = args.moving_reflector,
     )
     crypto = CipherPipeline(ctx, cfg)
 
