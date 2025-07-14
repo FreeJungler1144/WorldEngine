@@ -1,43 +1,28 @@
 {
-  "suite": "INOP-38",
+  "suite": "Legacy",
   "rotors": [
-    "R2",
-    "R9",
-    "R1",
-    "R8",
-    "R5"
+    "V",
+    "VI",
+    "III"
   ],
-  "reflector": "E",
+  "reflector": "B",
   "ring_set": [
-    26,
-    37,
-    14,
-    7,
-    32
+    6,
+    6,
+    4
   ],
-  "notch_map": {
-    "R2": "1V",
-    "R9": "1B",
-    "R1": "0QA",
-    "R8": "",
-    "R5": "M08"
-  },
+  "notch_map": {},
   "plugs": [
-    "DS",
-    "WG",
-    "2L",
-    "Z7",
-    "M#",
-    "UP",
-    "A3",
-    "YC",
-    "IB",
-    "EV",
-    "/4",
     "HK",
-    "9R",
-    "OT",
-    "8F"
+    "YW",
+    "VR",
+    "NT",
+    "SP",
+    "IL",
+    "CE",
+    "QO",
+    "ZU",
+    "MF"
   ],
-  "master_key": "M9XAKV"
+  "master_key": "LULY"
 }

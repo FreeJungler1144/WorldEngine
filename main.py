@@ -36,7 +36,7 @@ class Config:
     double_pass: bool = True        # encrypt‑reverse‑encrypt if True
     do_padding: bool = True         # wrap msg with marker + cover traffic
     step_reflector: bool = True    # step reflector on every keypress 
-    block: int = 8                  # display / padding block size
+    block: int = 5                  # display / padding block size
     base_noise: int = 8             # minimum random chars added when padding
     marker_len: int = 5             # hidden delimiter length
 
@@ -178,9 +178,9 @@ class MachineContext:
         return "".join(self.machine.encypher(ch) for ch in text)
 
 
-# ────────────────────────────────────────────────────────────────────────
-#  3. Padding & marker helpers
-# ────────────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────────────────────────────
+    #  3. Padding & marker helpers
+    # ────────────────────────────────────────────────────────────────────────
 
 
 def make_marker(alpha: str, length: int, choice=secure_choice) -> str:
@@ -196,7 +196,7 @@ def pad_message(
     target_residue: int = 1,
 ) -> str:
 
-    scaled_noise = max(base_noise, int(len(msg) * 0.25))
+    scaled_noise = max(base_noise, int(len(msg) * 0.35))
     residue = (len(msg) + scaled_noise) % block
     extra = (target_residue - residue) % block
     n = scaled_noise + extra
@@ -238,40 +238,42 @@ class CipherPipeline:
             marker = make_marker(self.ctx.alphabet, self.cfg.marker_len)
             wrapped = marker + msg + marker
             working = pad_message(
-                wrapped,
-                self.ctx.alphabet,
-                base_noise=self.cfg.base_noise,
-                block=self.cfg.block,
+            wrapped, self.ctx.alphabet,
+            base_noise=self.cfg.base_noise,
+            block=self.cfg.block,
             )
         else:
             marker = None
             working = msg
 
-        # normalise input
         clean = preprocess_message(working, self.ctx.alphabet)
 
-        # first pass
-        stage1 = self.ctx.encipher_block(clean)
+        if self.cfg.double_pass:
+            # Double-pass encryption
+            stage1 = self.ctx.encipher_block(clean)
+            stage2_input = stage1[::-1]
+            cipher = self.ctx.encipher_block(stage2_input)
+        else:
+            # Single-pass encryption
+            cipher = self.ctx.encipher_block(clean)
 
-        # optional reverse
-        stage2_input = stage1[::-1] if self.cfg.double_pass else stage1
-
-        # second pass (or identical if single‑pass mode)
-        cipher = self.ctx.encipher_block(stage2_input)
         return cipher, marker
 
     def decrypt(self, cipher: str, marker: str | None = None) -> str:
-        # first pass
-        stage1 = self.ctx.encipher_block(cipher)
-        # reverse if we did so during encryption
-        stage2_input = stage1[::-1] if self.cfg.double_pass else stage1
-        # second / final pass
-        full_plain = self.ctx.encipher_block(stage2_input)
+        if self.cfg.double_pass:
+            # Double-pass decryption
+            stage1 = self.ctx.encipher_block(cipher)
+            stage2_input = stage1[::-1]
+            full_plain = self.ctx.encipher_block(stage2_input)
+        else:
+            # Single-pass decryption
+            full_plain = self.ctx.encipher_block(cipher)
 
         if self.cfg.do_padding and marker is not None:
             real = extract_message(full_plain, marker)
         else:
             real = full_plain
+
         return real.replace("#", " ")
 
 
@@ -284,10 +286,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Encrypt or decrypt with Inop")
     p.add_argument("-m", "--message", metavar="TEXT", help="Plaintext to encrypt. If omitted, an interactive REPL starts.")
     p.add_argument("--double-pass", dest="double_pass", choices=["on", "off"], default="on", help="Encrypt, reverse, encrypt (on) or classic single pass (off). Default: on")
-    p.add_argument("--padding", dest="padding", choices=["on", "off"], default="on", help="Add random cover traffic and hidden marker. Default: off")
+    p.add_argument("--padding", dest="padding", choices=["on", "off"], default="on", help="Add random cover traffic and hidden marker. Default: on")
+    p.add_argument(
+    "--moving-reflector", dest="moving_reflector", choices=["on", "off"], default="on", help="Enable rotating reflector logic. Default: off"
+)
+
     p.add_argument("--config", metavar="FILE", help="Load machine settings from JSON instead of answering prompts.")
     p.add_argument("--interactive", action="store_true", help="Ignore any JSON file and run the interactive prompt chain.")
-    p.add_argument("--moving-reflector", action="store_true", help="Step the reflector one notch per key-press.")
     return p.parse_args()
 
 
@@ -325,7 +330,7 @@ def main() -> None:
     cfg = Config(
         double_pass=(args.double_pass == "on"),
         do_padding=(args.padding == "on"),
-        step_reflector = args.moving_reflector,
+        step_reflector = (args.moving_reflector == "on"),
     )
     crypto = CipherPipeline(ctx, cfg)
 
@@ -339,16 +344,16 @@ def main() -> None:
         return
 
     # interactive REPL ---------------------------------------------------
-    print(f"Loaded suite '{suite_name}' with alphabet length {len(alphabet)}.")
+    print(f"\nLoaded suite '{suite_name}' with alphabet length {len(alphabet)}.")
     print("Type blank line to quit.\n")
     while True:
-        txt = input("Message to encrypt: ")
+        txt = input("\nMessage to encrypt: ")
         if not txt.strip():
             break
         cipher, marker = crypto.encrypt(txt)
         blocks = [cipher[i : i + cfg.block] for i in range(0, len(cipher), cfg.block)]
-        print("Encrypted:", "  ".join(blocks))
-        print("Decrypted:", crypto.decrypt(cipher, marker))
+        print("\nEncrypted:", "  ".join(blocks))
+        print("\nDecrypted:", crypto.decrypt(cipher, marker))
 
 
 if __name__ == "__main__":
