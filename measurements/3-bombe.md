@@ -124,7 +124,7 @@ prefix to test and the whole 48-symbol body goes through both passes.
 
 **This experiment cannot price what the double pass was actually built to
 destroy.** Its purpose is to remove no-self-encipherment, which is what
-made *crash elimination* work -- the classical bombe's trick of discarding
+made *crash elimination* work -- the trick the classical bombe used, discarding
 crib placements where a letter would have to encipher to itself, before any
 rotor is turned. This instrument never used crash elimination; it is a
 brute-force crib-dragger, and it tests every placement it is given. So the
@@ -137,7 +137,7 @@ removes.**
 
 **Daily regeneration is the wall.** Both unknown-wiring cells return zero
 survivors and never find the truth, because the answer is not in the search
-space at all: the day's wheels are fresh permutations that appear in no
+space at all: the wheels for that day are fresh permutations that appear in no
 catalogue. Zero survivors rather than wrong ones means the attacker is not
 even misled -- 6.58 million candidate settings produce nothing that
 reproduces a 16-symbol crib.
@@ -283,8 +283,8 @@ attack outright rather than taxing it.
 ## What was not built
 
 **Phase 2, the steckered bombe.** Assume a plugboard pair, propagate the
-crib's implications through the wiring, reject on contradiction. That is
-the bombe's actual idea and the diagonal board is what makes it work. Not
+implications of the crib through the wiring, reject on contradiction. That is
+the actual idea behind the bombe, and the diagonal board is what makes it work. Not
 implemented. The consequence is stated above: the double pass has been
 priced against brute force, and brute force is not the attack the double
 pass was designed against.

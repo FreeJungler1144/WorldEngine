@@ -14,7 +14,7 @@
 # the POSIX branch. It does not fork, so the fork-safety fix itself is
 # still not exercised by anything -- it is merely, for the first time,
 # compiled and adjacent to running code. A test that actually forks and
-# compares the child's draws against the parent's would close that, and is
+# compares the draws in the child against those in the parent would close that, and is
 # not written.
 
 name: ci
@@ -51,8 +51,8 @@ jobs:
       - name: install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
       # The same flags as the cli-sanitize preset, spelled out rather than
-      # --preset so this job does not depend on the preset file's compiler
-      # pin (g++.exe) which is a Windows path.
+      # --preset so this job does not depend on the compiler pin in the
+      # preset file (g++.exe), which is a Windows path.
       - name: configure
         run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DINOP_WERROR=ON
@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # No INOP_WERROR here. This project has been built with MinGW gcc for
-      # its whole life and has never seen MSVC's warning set, so turning
+      # its whole life and has never seen the MSVC warning set, so turning
       # warnings into errors on a compiler nobody has run would only
       # produce a red badge nobody can act on. Turn it on once the job is
       # green and the warnings are known.

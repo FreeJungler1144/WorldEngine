@@ -138,10 +138,10 @@ FieldValidity derive_validity(const PanelState& state) {
     }
 
     // A notch symbol may be used at most once anywhere in the active set —
-    // not just within one rotor's own boxes (a rotor cannot sensibly notch
+    // not just within the boxes of one rotor (a rotor cannot sensibly notch
     // on the same letter twice) but across different rotors too. The rule
-    // itself lives in duplicate_notch_symbol() in the logic layer, where
-    // the generator's own version of it also lives; this panel used to
+    // itself lives in duplicate_notch_symbols() in the logic layer, where
+    // the version the generator enforces also lives; this panel used to
     // carry a second, independent implementation of a cryptographic
     // validity rule, which is the failure the rotation check already went
     // through once.
