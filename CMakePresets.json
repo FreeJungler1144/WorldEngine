@@ -12,6 +12,25 @@
       }
     },
     {
+      "name": "cli-werror",
+      "displayName": "CLI, warnings are errors (what CI builds)",
+      "inherits": "cli",
+      "binaryDir": "${sourceDir}/build/cli-werror",
+      "cacheVariables": { "INOP_WERROR": "ON" }
+    },
+    {
+      "name": "cli-sanitize",
+      "displayName": "CLI under address+undefined sanitizers (Linux/CI only)",
+      "inherits": "cli",
+      "binaryDir": "${sourceDir}/build/cli-sanitize",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "INOP_WERROR": "ON",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
       "name": "gui",
       "displayName": "GUI enabled (MinGW + vcpkg x64-mingw-static)",
       "generator": "Ninja",
@@ -26,6 +45,8 @@
   ],
   "buildPresets": [
     { "name": "cli", "configurePreset": "cli" },
+    { "name": "cli-werror", "configurePreset": "cli-werror" },
+    { "name": "cli-sanitize", "configurePreset": "cli-sanitize" },
     { "name": "gui", "configurePreset": "gui" }
   ]
 }

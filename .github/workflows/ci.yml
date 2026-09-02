@@ -1,0 +1,89 @@
+# CI for INOP.
+#
+# NOTHING IN THIS FILE HAS EVER RUN. It was written on a branch that has
+# not been pushed, so every job below is untested and the first push should
+# expect to fix something here rather than in the code.
+#
+# The linux job exists for one specific reason beyond general coverage:
+# rng.cpp has a POSIX branch, including the fork-safety fix that discards
+# the entropy pool when the pid changes, and the development machine is
+# Windows. That code has been reviewed and never executed. This is the only
+# thing that will ever execute it.
+#
+# Note what that does and does not cover. The linux job compiles and runs
+# the POSIX branch. It does not fork, so the fork-safety fix itself is
+# still not exercised by anything -- it is merely, for the first time,
+# compiled and adjacent to running code. A test that actually forks and
+# compares the child's draws against the parent's would close that, and is
+# not written.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-gcc:
+    name: linux gcc, warnings are errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: configure
+        run: cmake -S . -B build -G Ninja -DINOP_WERROR=ON -DCMAKE_BUILD_TYPE=Release
+      - name: build
+        run: cmake --build build
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure
+      - name: self-test
+        run: ./build/inop --self-test --no-color
+      - name: benchmark harness
+        run: ./build/inop_benchmark --languages all --out /tmp/benchmark.csv
+
+  linux-sanitize:
+    name: linux, address and undefined sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      # The same flags as the cli-sanitize preset, spelled out rather than
+      # --preset so this job does not depend on the preset file's compiler
+      # pin (g++.exe) which is a Windows path.
+      - name: configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DINOP_WERROR=ON
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: build
+        run: cmake --build build
+      - name: ctest under sanitizers
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build --output-on-failure
+      - name: self-test under sanitizers
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          ASAN_OPTIONS: detect_leaks=1
+        run: ./build/inop --self-test --no-color
+
+  windows-msvc:
+    name: windows msvc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No INOP_WERROR here. This project has been built with MinGW gcc for
+      # its whole life and has never seen MSVC's warning set, so turning
+      # warnings into errors on a compiler nobody has run would only
+      # produce a red badge nobody can act on. Turn it on once the job is
+      # green and the warnings are known.
+      - name: configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: build
+        run: cmake --build build --config Release
+      - name: ctest
+        run: ctest --test-dir build -C Release --output-on-failure

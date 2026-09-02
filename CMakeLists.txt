@@ -36,6 +36,13 @@ set(INOP_SRC_DIRS
 # vcpkg toolchain file (see CMakePresets.json's "gui" preset).
 option(INOP_WITH_GUI "Build the optional GLFW/OpenGL settings-panel GUI" OFF)
 
+# Warnings as errors, off by default and on in CI. Deliberately not the
+# default: a compiler upgrade that introduces one new warning would
+# otherwise stop the build on a machine where somebody is trying to send a
+# message, and that trade is wrong for this project. CI has no such
+# constraint and runs with it on.
+option(INOP_WERROR "Treat compiler warnings as errors" OFF)
+
 if(INOP_WITH_GUI)
   find_package(glfw3 CONFIG REQUIRED)
   find_package(OpenGL REQUIRED)
@@ -99,8 +106,26 @@ foreach(tgt inop inop_benchmark inop_langprobe)
 
   if(MSVC)
     target_compile_options(${tgt} PRIVATE /W4 /utf-8)
+    if(INOP_WERROR)
+      target_compile_options(${tgt} PRIVATE /WX)
+    endif()
   else()
     target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic)
+    if(INOP_WERROR)
+      target_compile_options(${tgt} PRIVATE -Werror)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+        # -Wdangling-reference fires on every `const Suite& s = suite("38")`
+        # in the tree. suite() returns a reference into a function-local
+        # static map and keeps nothing, so none of them dangle; the GCC 13
+        # heuristic looks at the call expression, sees a temporary argument,
+        # and warns anyway. Four call sites could each be rewritten to bind
+        # the literal to a named local first, which would silence a compiler
+        # heuristic by making the code worse. Turned off here instead, and
+        # only where -Werror would otherwise turn a false positive into a
+        # build failure.
+        target_compile_options(${tgt} PRIVATE -Wno-dangling-reference)
+      endif()
+    endif()
   endif()
 
   if(WIN32)
