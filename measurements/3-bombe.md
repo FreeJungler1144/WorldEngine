@@ -223,6 +223,63 @@ agreeing with that retraction: to an attacker, the two transpositions are
 interchangeable, and the half-swap should continue to be credited with the
 fixed point and nothing else.
 
+## Crash elimination: the number the ablation was missing
+
+The four-cell table prices the double pass against brute force, which is
+not the attack it was built against. This prices it against the one that
+is.
+
+Before a bombe turns a rotor it slides the crib along the ciphertext and
+throws out every placement where a symbol would have to encipher to itself.
+A reflector without fixed points makes that impossible, so a crash proves
+the placement wrong. The filter is free, and it is the thing the double
+pass destroys.
+
+200 trials per row, body 96, `--crash-elimination`.
+
+| crib | placements | crashed, dp off | crashed, half-swap | theory `1-(37/38)^m` | true placement discarded, dp off | true placement discarded, half-swap |
+|---|---|---|---|---|---|---|
+| 8 | 17,800 | 19.5% | 19.1% | 19.2% | **0 of 200** | 29 of 200 (14.5%) |
+| 16 | 16,200 | 33.5% | 34.9% | 34.7% | **0 of 200** | 67 of 200 (33.5%) |
+| 24 | 14,600 | 46.2% | 47.7% | 47.3% | **0 of 200** | 92 of 200 (46.0%) |
+| 32 | 13,000 | 56.4% | 57.3% | 57.4% | **0 of 200** | 124 of 200 (62.0%) |
+
+Three things, in order of importance.
+
+**The control is exact.** With the double pass off, the true placement
+never crashes -- 0 of 200, at every crib length. That is not luck, it is
+the no-self-encipherment property, and a single non-zero entry in that
+column would have meant the harness was wrong rather than the machine. It
+is the strongest validation in this document.
+
+**The measured crash rate matches theory to within a percent** at all four
+crib lengths, in both configurations. The filter itself is unaffected by
+the double pass: it still removes the same third of placements, because
+ciphertext still looks random against a crib.
+
+**What the double pass changes is that the filter now eats the answer.**
+With the half-swap on, the true placement crashes at the same rate as any
+wrong one -- 14.5%, 33.5%, 46.0%, 62.0%, rising with crib length exactly as
+a random placement would. An attacker who applies crash elimination to
+INOP-38 discards the correct crib position a third of the time at a
+16-symbol crib, and two thirds of the time at 32. The longer the crib, the
+worse it gets, which inverts the usual relationship: against Enigma a
+longer crib is a better crib.
+
+So the double pass costs a classical attacker two separate things:
+
+| | measured |
+|---|---|
+| work per candidate setting | 4.65x more |
+| free placement filter | 34% saving at a 16-symbol crib, forfeited |
+| penalty for using it anyway | the right answer discarded 33.5% of the time |
+
+Multiplying the first two gives roughly **7x** against this class of
+attack. That is the honest headline. It is a real cost, it is the first
+number the project has for it, and it is a constant factor rather than a
+wall. Daily regeneration remains the only measured defence that stops the
+attack outright rather than taxing it.
+
 ## What was not built
 
 **Phase 2, the steckered bombe.** Assume a plugboard pair, propagate the
@@ -232,10 +289,15 @@ implemented. The consequence is stated above: the double pass has been
 priced against brute force, and brute force is not the attack the double
 pass was designed against.
 
-**Crash elimination.** The filter that discards a crib placement when a
-symbol would have to encipher to itself. It is the cheap half of the
-classical method and the half the double pass removes.
+Crash elimination was in this list until it was measured, and moving it out
+changed the conclusion: the double pass costs about 7x against a classical
+attacker rather than the 4.65x the four-cell table alone suggested. The
+remaining gap is the steckered search, and it is the piece that would say
+whether a plugboard of 15 pairs survives contact with a diagonal board.
 
-Both belong to the same piece of work, and it is the piece that would turn
-the 4.65x above into a number about the defence rather than a number about
-message length.
+One more thing this instrument cannot see. It searches settings under a
+known machine. Nothing here attacks the wirings themselves -- the
+statistical route of recovering a rotor from a large body of traffic under
+one key, which is what the depth problem in register item 5 actually feeds.
+Daily regeneration answers a bombe. Whether it answers that is a separate
+question and it is not measured anywhere in this repository.

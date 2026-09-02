@@ -25,6 +25,7 @@
 //   inop_bombe --inop-ablation [--pool N] [--body N] [--crib N]
 //   inop_bombe --notch-sweep
 //   inop_bombe --transposition
+//   inop_bombe --crash-elimination
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -487,6 +488,70 @@ int notch_sweep(size_t pool_size, size_t body_len, size_t crib_len) {
     return 0;
 }
 
+// The cheap half of the classical method, and the half the double pass was
+// built to destroy. Before a bombe turns a single rotor it slides the crib
+// along the ciphertext and throws out every placement where a symbol would
+// have to encipher to itself, which the reflector makes impossible. That
+// filter costs nothing and removes a third of the placements.
+//
+// The double pass makes ciphertext position i depend on plaintext position
+// tau(i), so self-encipherment becomes possible and the filter stops being
+// sound. This measures both halves of that: how many placements the filter
+// removes, and -- the part that matters -- how often it throws away the
+// right answer once the double pass is on.
+int crash_elimination(size_t pool_size, size_t body_len, size_t crib_len, int trials) {
+    const Suite& su = suite("38");
+    Alphabet alpha(su.alphabet);
+    std::vector<Wheel> pool = catalogue(su, pool_size);
+
+    std::cout << "\n  Crash elimination. " << trials << " trials, body " << body_len
+              << ", crib " << crib_len << ".\n"
+              << "  A placement crashes when crib[k] equals ciphertext[j+k] for some k, which\n"
+              << "  a reflector without fixed points makes impossible -- so a crash proves the\n"
+              << "  placement wrong, for free, before any rotor turns.\n\n";
+
+    for (Tau tau : {Tau::None, Tau::HalfSwap}) {
+        long long placements = 0, crashed = 0, trials_true_crashed = 0;
+        for (int t = 0; t < trials; ++t) {
+            Setting truth;
+            std::vector<Wheel> shuffled = pool;
+            for (size_t i = shuffled.size(); i > 1; --i)
+                std::swap(shuffled[i - 1], shuffled[secure_below(static_cast<uint32_t>(i))]);
+            truth.rotors.assign(shuffled.begin(), shuffled.begin() + 3);
+            truth.reflector = Wheel{available_reflectors(su).front(), "", ""};
+            truth.key = secure_string(alpha.str(), 3) + alpha.at(0);
+
+            std::string plain = filler(alpha, body_len);
+            Machine m = build(su, truth, false, true);
+            std::string ct = transform(m, plain, tau);
+
+            const size_t span = body_len - crib_len;
+            size_t true_off = secure_below(static_cast<uint32_t>(span + 1));
+            std::string crib = plain.substr(true_off, crib_len);
+
+            for (size_t j = 0; j <= span; ++j) {
+                bool crash = false;
+                for (size_t k = 0; k < crib_len && !crash; ++k)
+                    if (crib[k] == ct[j + k]) crash = true;
+                ++placements;
+                if (crash) ++crashed;
+                if (crash && j == true_off) ++trials_true_crashed;
+            }
+        }
+        std::cout << "  " << std::left << std::setw(20) << tau_name(tau) << std::right
+                  << "  placements " << std::setw(8) << placements << "  crashed "
+                  << std::setw(8) << crashed << " (" << std::fixed << std::setprecision(1)
+                  << 100.0 * static_cast<double>(crashed) / static_cast<double>(placements)
+                  << "%)   TRUE placement wrongly discarded " << trials_true_crashed << "/"
+                  << trials << " (" << std::setprecision(1)
+                  << 100.0 * trials_true_crashed / trials << "%)\n";
+    }
+    std::cout << "\n  With the double pass off the true placement can never crash. A non-zero\n"
+                 "  figure in that row would mean this harness is wrong, not that the machine\n"
+                 "  is.\n";
+    return 0;
+}
+
 int transposition_sweep(size_t pool_size, size_t body_len, size_t crib_len) {
     const Suite& su = suite("38");
     Alphabet alpha(su.alphabet);
@@ -551,6 +616,7 @@ int main(int argc, char** argv) {
         if (mode == "--inop-ablation") return inop_ablation(pool, body, crib);
         if (mode == "--notch-sweep") return notch_sweep(pool, body, crib);
         if (mode == "--transposition") return transposition_sweep(pool, body, crib);
+        if (mode == "--crash-elimination") return crash_elimination(pool, body, crib, 200);
     } catch (const std::exception& e) {
         std::cerr << "bombe: " << e.what() << "\n";
         return 1;

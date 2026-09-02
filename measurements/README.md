@@ -16,6 +16,7 @@ python benchmark/diacritic_measure.py --probe probe_out --out measurements
 ./build/cli/inop_bombe --inop-ablation --pool 6 --body 48 --crib 16
 ./build/cli/inop_bombe --notch-sweep --pool 6 --body 48 --crib 16
 ./build/cli/inop_bombe --transposition --pool 6 --body 48 --crib 16
+./build/cli/inop_bombe --crash-elimination --pool 6 --body 96 --crib 16
 ```
 
 `inop_langprobe` is offline and headless, like `inop_benchmark`, and is
@@ -34,7 +35,7 @@ tables changes these numbers.
 | `1.3-search-space.md` | supports 1.2 | the fold grammar removes 0.34 to 0.39 bits per symbol, about a sixth of what ordinary language redundancy already gives away. Cross-check with 1.2 passes 48 of 48 |
 | `1.4-language-fingerprint.md` | **item 3**, decides **item 8** | **item 8 is overkill.** Mark digits identify the language 54 percent of the time at 500 characters; the letters beside them already do it 92 percent of the time |
 | `1.5-permuted-table-recovery.md` | **section E, keying the table** | **split.** Confirmed for Yoruba, Hindi and Czech at 200 to 740 characters. Not reproduced for Cantonese or Pinyin at any window the corpus allows |
-| `3-bombe.md` | the central design bet | **mixed, and the first numbers the project has.** Daily regeneration stops the bombe dead. The double pass costs 4.65x and does not stop it. The notch curve is flat. Reversal and half-swap cost the same |
+| `3-bombe.md` | the central design bet | **mixed, and the first numbers the project has.** Daily regeneration stops the bombe dead. The double pass costs about 7x and does not stop it. The notch curve is flat. Reversal and half-swap cost the same |
 
 ## The one thing these numbers do not do
 
