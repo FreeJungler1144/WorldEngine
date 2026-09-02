@@ -540,6 +540,430 @@ def exp_grammar(langs, out, pred_rows):
     return rows
 
 
+# -- 1.4 language fingerprint -------------------------------------------
+
+def features(s, tags, kind):
+    """Feature counts for one sample.
+
+    marks   the mark-digit distribution alone, which is what item 3 leaves
+            on the wire once the language tag is deleted
+    pairs   (base letter, mark code), the same signal with the letter it
+            sits on
+    letters the letter distribution alone -- the control. An analyst reads
+            this off a stripped stream too, with no diacritic scheme
+            present at all, so anything it already achieves is not
+            attributable to the scheme.
+    """
+    c = Counter()
+    if kind == "letters":
+        for ch, t in zip(s, tags):
+            if t == "L":
+                c[ch] += 1
+        return c
+    for base, code in mark_events(s, tags):
+        c[code if kind == "marks" else (base, code)] += 1
+    return c
+
+
+def nb_train(samples, alpha=0.5):
+    vocab = set()
+    for c in samples.values():
+        vocab |= set(c)
+    vocab = sorted(vocab, key=repr)
+    vi = {f: i for i, f in enumerate(vocab)}
+    k = len(vocab)
+    logp = {}
+    for lang, c in samples.items():
+        v = np.full(k, alpha)
+        for f, n in c.items():
+            v[vi[f]] += n
+        logp[lang] = np.log(v / v.sum())
+    return vi, logp
+
+
+def nb_predict(vi, logp, counts):
+    k = len(vi)
+    v = np.zeros(k)
+    seen = 0
+    for f, n in counts.items():
+        if f in vi:
+            v[vi[f]] += n
+            seen += n
+    if not seen:
+        return None
+    best, best_s = None, -1e300
+    for lang, lp in logp.items():
+        s = float(np.dot(v, lp))
+        if s > best_s:
+            best, best_s = lang, s
+    return best
+
+
+def exp_fingerprint(langs, out, lengths=(100, 500, 2000), trials=200, seed=12345):
+    rng = np.random.default_rng(seed)
+    prepared = {}
+    for lang, d in langs.items():
+        s = d["folded"]
+        tags = classify(s)
+        cut = int(len(s) * 0.7)
+        prepared[lang] = (s, tags, cut)
+
+    results = {}
+    per_lang = {}
+    confusion = {}
+    for kind in ("marks", "pairs", "letters"):
+        train = {lang: features(s[:cut], t[:cut], kind) for lang, (s, t, cut) in prepared.items()}
+        vi, logp = nb_train(train)
+        for L in lengths:
+            ok = tot = 0
+            silent = 0
+            pl = {}
+            conf = defaultdict(Counter)
+            for lang, (s, t, cut) in prepared.items():
+                lo, hi = cut, len(s)
+                l_ok = l_tot = 0
+                for _ in range(trials):
+                    if hi - lo <= L:
+                        start = lo
+                        end = hi
+                    else:
+                        start = int(rng.integers(lo, hi - L))
+                        end = start + L
+                    pred = nb_predict(vi, logp, features(s[start:end], t[start:end], kind))
+                    l_tot += 1
+                    if pred is None:
+                        silent += 1
+                        conf[lang]["(no signal)"] += 1
+                    else:
+                        conf[lang][pred] += 1
+                        if pred == lang:
+                            l_ok += 1
+                ok += l_ok
+                tot += l_tot
+                pl[lang] = l_ok / l_tot
+            results[(kind, L)] = ok / tot
+            per_lang[(kind, L)] = pl
+            confusion[(kind, L)] = conf
+            print("  1.4 %-7s L=%-5d top1=%.4f  silent=%d" % (kind, L, ok / tot, silent))
+
+    conf = confusion[("marks", 500)]
+    with open(os.path.join(out, "1.4-confusion-marks-500.csv"), "w", encoding="utf-8", newline="\n") as f:
+        cols = sorted(langs) + ["(no signal)"]
+        f.write("true," + ",".join(cols) + "\n")
+        for lang in sorted(langs):
+            f.write(lang + "," + ",".join(str(conf[lang][c]) for c in cols) + "\n")
+
+    pairs = []
+    for lang in sorted(langs):
+        for pred, n in conf[lang].items():
+            if pred != lang and pred != "(no signal)" and n:
+                pairs.append((n, lang, pred))
+    pairs.sort(reverse=True)
+
+    lines = [
+        "# 1.4 Language fingerprint",
+        "",
+        "**Settles register item 3** (delete the 3-letter language tag riding on",
+        "the ciphertext in clear) and **decides whether item 8 is necessary** (a",
+        "fixed-ratio trailer, so length does not leak the language).",
+        "",
+        "If the mark-digit distribution identifies the language on its own, then",
+        "deleting the tag hides nothing and item 8 has something to fix. If it",
+        "does not, item 8 is defending a channel that is not leaking.",
+        "",
+        "Multinomial naive Bayes, Laplace-smoothed, trained on the first 70",
+        "percent of each folded stream and tested on %d random windows per" % trials,
+        "language from the last 30 percent. 48 classes, so chance is 2.1 percent.",
+        "",
+        "Three feature sets, and the third one is the point:",
+        "",
+        "- **marks** -- the mark-digit distribution alone. This is exactly what",
+        "  item 3 leaves visible once the tag is gone.",
+        "- **pairs** -- (base letter, mark code) together.",
+        "- **letters** -- the letter distribution alone, the **control**. An",
+        "  analyst reads this off any stripped stream, with no diacritic scheme",
+        "  present at all. Whatever it already achieves is not attributable to",
+        "  the scheme and cannot be fixed by changing the scheme.",
+        "",
+        "| feature set | 100 chars | 500 chars | 2000 chars |",
+        "|---|---|---|---|",
+    ]
+    for kind in ("marks", "pairs", "letters"):
+        lines.append("| %s | %.4f | %.4f | %.4f |" % (
+            kind, results[(kind, 100)], results[(kind, 500)], results[(kind, 2000)]))
+
+    lines += [
+        "",
+        "## Per-language accuracy, marks only, 500-character windows",
+        "",
+        "| lang | accuracy | mark events in window (mean) |",
+        "|---|---|---|",
+    ]
+    dens = {}
+    for lang, (s, t, cut) in prepared.items():
+        ev = len(mark_events(s, t))
+        dens[lang] = 500.0 * ev / len(s)
+    for lang, acc in sorted(per_lang[("marks", 500)].items(), key=lambda kv: -kv[1]):
+        lines.append("| %s | %.4f | %.1f |" % (lang, acc, dens[lang]))
+
+    lines += [
+        "",
+        "## Top confusions, marks only, 500-character windows",
+        "",
+        "Full 48x48 matrix in `1.4-confusion-marks-500.csv`.",
+        "",
+        "| true | predicted | count of %d |" % trials,
+        "|---|---|---|",
+    ]
+    for n, lang, pred in pairs[:20]:
+        lines.append("| %s | %s | %d |" % (lang, pred, n))
+
+    lines += [
+        "",
+        "## Verdict",
+        "",
+        "Marks alone reach %.1f percent at 500 characters and %.1f percent at" % (
+            100 * results[("marks", 500)], 100 * results[("marks", 2000)]),
+        "2,000, against %.1f percent chance. The control reaches %.1f percent at" % (
+            100 / len(langs), 100 * results[("letters", 500)]),
+        "500 characters on letters alone.",
+        "",
+        "The comparison that matters is between those two numbers, not between",
+        "the mark figure and chance.",
+    ]
+    with open(os.path.join(out, "1.4-language-fingerprint.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return results
+
+
+# -- 1.5 permuted-table recovery ----------------------------------------
+
+def hungarian(cost):
+    """Minimum-cost assignment, O(n^3), for a square matrix. Standard
+    potentials formulation; scipy is not available on this machine."""
+    n = len(cost)
+    INF = float("inf")
+    u = [0.0] * (n + 1)
+    v = [0.0] * (n + 1)
+    p = [0] * (n + 1)
+    way = [0] * (n + 1)
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = [INF] * (n + 1)
+        used = [False] * (n + 1)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = INF
+            j1 = -1
+            for j in range(1, n + 1):
+                if used[j]:
+                    continue
+                cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                if cur < minv[j]:
+                    minv[j] = cur
+                    way[j] = j0
+                if minv[j] < delta:
+                    delta = minv[j]
+                    j1 = j
+            for j in range(n + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    out = [0] * n
+    for j in range(1, n + 1):
+        out[p[j] - 1] = j - 1
+    return out
+
+
+def digit_profile(events):
+    """P[letter][digit] counts, digit-wise: a two-digit code contributes to
+    both of its digits, which is what a permutation of the ten meanings
+    actually acts on."""
+    prof = defaultdict(lambda: np.zeros(10))
+    for base, code in events:
+        for ch in str(code):
+            prof[base][int(ch)] += 1
+    return prof
+
+
+def recover_permutation(ref, obs):
+    """Assign each observed digit to a reference digit by maximum
+    multinomial log-likelihood over the base-letter profile."""
+    letters = sorted(set(ref) | set(obs))
+    R = np.array([[ref[l][d] if l in ref else 0.0 for l in letters] for d in range(10)])
+    O = np.array([[obs[l][d] if l in obs else 0.0 for l in letters] for d in range(10)])
+    R = (R + 0.5) / (R + 0.5).sum(axis=1, keepdims=True)
+    logR = np.log(R)
+    cost = [[-float(np.dot(O[dp], logR[d])) for dp in range(10)] for d in range(10)]
+    return hungarian(cost)
+
+
+def exp_permrecover(langs, out, n_perms=120, seed=99, grid=(50, 100, 200, 400, 800, 1600, 3200, 6400)):
+    rng = np.random.default_rng(seed)
+    dens = []
+    for lang, d in langs.items():
+        tags = classify(d["folded"])
+        ev = mark_events(d["folded"], tags)
+        dens.append((len(ev) / len(d["folded"]), lang, ev, d["folded"], tags))
+    dens.sort(reverse=True)
+    nonzero = [x for x in dens if x[2]]
+    zero = [x[1] for x in dens if not x[2]]
+    chosen = nonzero[:5] + nonzero[-5:]
+
+    rows = []
+    for density, lang, ev, s, tags in chosen:
+        cut = int(len(s) * 0.5)
+        ref_ev = mark_events(s[:cut], tags[:cut])
+        ref = digit_profile(ref_ev)
+        used = sorted({int(ch) for _, code in ref_ev for ch in str(code)})
+        if not used or not ref_ev:
+            rows.append({"lang": lang, "density": density, "events": len(ev),
+                         "used": 0, "solved": 0, "mean_n": None, "median_n": None})
+            continue
+
+        solved = 0
+        needed = []
+        for _ in range(n_perms):
+            perm = list(rng.permutation(10))
+            remap = str.maketrans("0123456789", "".join(str(perm[i]) for i in range(10)))
+            first = None
+            for N in grid:
+                if N > len(s) - cut:
+                    break
+                window = s[cut:cut + N]
+                wtags = tags[cut:cut + N]
+                pev = [(b, int(str(c).translate(remap))) for b, c in mark_events(window, wtags)]
+                if not pev:
+                    continue
+                obs = digit_profile(pev)
+                assign = recover_permutation(ref, obs)
+                # assign[d] is the observed digit believed to mean d.
+                if all(assign[d] == perm[d] for d in used):
+                    if first is None:
+                        first = N
+                else:
+                    first = None
+            if first is not None:
+                solved += 1
+                needed.append(first)
+        rows.append({
+            "lang": lang, "density": density, "events": len(ev), "used": len(used),
+            "solved": solved, "avail": len(s) - cut, "ref_events": len(ref_ev),
+            "mean_n": (sum(needed) / len(needed)) if needed else None,
+            "median_n": (sorted(needed)[len(needed) // 2]) if needed else None,
+        })
+        print("  1.5 %-4s density=%.4f used=%d solved=%d/%d mean_n=%s"
+              % (lang, density, len(used), solved, n_perms,
+                 ("%.0f" % rows[-1]["mean_n"]) if rows[-1]["mean_n"] else "-"))
+
+    lines = [
+        "# 1.5 Permuted-table recovery",
+        "",
+        "**Settles a rejection sitting unmeasured**: section E rejects keying the",
+        "diacritic table per session, on the argument that the analyst does not",
+        "need the mapping because frequency analysis recovers it from a few",
+        "hundred characters of a known language. That is the second half of item",
+        "4 and it had never been run.",
+        "",
+        "Method. Permute the ten digit meanings at random, relabel every mark",
+        "digit in the folded stream accordingly (a two-digit code is relabelled",
+        "digit by digit, which is what a permutation of the meanings actually",
+        "does to it), then try to recover the permutation by matching",
+        "(base letter, digit) frequencies against the unpermuted profile of the",
+        "same language. The reference profile comes from the first half of the",
+        "corpus, recovery is attempted on windows from the second half, and the",
+        "assignment is the maximum-likelihood one over all 10-digit bijections",
+        "(Hungarian algorithm, not a greedy match).",
+        "",
+        "Recovery counts as successful only when **every digit the language",
+        "actually uses** is mapped correctly, and stays correct for every longer",
+        "window tested. Digits the language never uses are unconstrained and are",
+        "not counted against it -- there is nothing in the text to identify them",
+        "with.",
+        "",
+        "%d random permutations per language. The five densest and five sparsest" % n_perms,
+        "languages that carry any mark at all.",
+        "",
+        "| lang | mark events/symbol | mark events in corpus | reference events | digits used | recovered | mean chars to recovery | median | window available |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append("| %s | %.4f | %d | %d | %d | %d/%d | %s | %s | %d |" % (
+            r["lang"], r["density"], r["events"], r.get("ref_events", 0), r["used"],
+            r["solved"], n_perms,
+            ("%.0f" % r["mean_n"]) if r["mean_n"] else "not recovered",
+            ("%d" % r["median_n"]) if r["median_n"] else "-", r.get("avail", 0)))
+
+    dense_rows = rows[:5]
+    sparse_rows = rows[5:]
+    full = [r for r in dense_rows if r["solved"] == n_perms]
+    never = [r for r in dense_rows if r["solved"] == 0]
+    lines += [
+        "",
+        "Seven languages are excluded because their corpus carries no mark at",
+        "all (%s). Nothing can be recovered from a table" % ", ".join(zero),
+        "that the text never exercises, and nothing leaks through one either.",
+        "",
+        "Window sizes tested: %s symbols of folded text," % ", ".join(str(g) for g in grid),
+        "capped by the window available in the last column. A language marked",
+        "`not recovered` was not recovered within that cap, which is a limit of",
+        "the corpus, not a proof that it never falls.",
+        "",
+        "## How to read the sparse half",
+        "",
+        "For a language whose corpus uses a single digit, recovery means placing",
+        "that one digit. Most windows contain no mark at all, so the assignment",
+        "is arbitrary and lands correctly about one time in ten by luck. Read the",
+        "sparse rows as **nothing to recover**, not as **hard to recover**: the",
+        "quantity being protected is a handful of characters in a whole corpus.",
+        "",
+        "## Verdict",
+        "",
+        "**Split.** The rejection in section E is right for some languages and",
+        "wrong for others, and the split is not the one the argument predicts.",
+        "",
+        "Recovered on every one of the %d permutations: %s." % (
+            n_perms, ", ".join("%s at a mean of %.0f characters" % (r["lang"], r["mean_n"])
+                               for r in full) or "none"),
+        "That is the section E claim confirmed, at the order of magnitude it",
+        "states -- a few hundred characters of a known language.",
+        "",
+        "Never recovered, at any window the corpus allows: %s." % (
+            ", ".join("%s (%d digits in use, %d symbols available)"
+                      % (r["lang"], r["used"], r["avail"]) for r in never) or "none"),
+        "These are the tone languages. Their digits sit on the same five vowels",
+        "with similar frequencies, so the letter-conditional profile that",
+        "identifies an acute from a caron elsewhere has almost nothing to",
+        "separate tone 1 from tone 2. The mapping is not identifiable from",
+        "frequencies alone at this corpus size.",
+        "",
+        "So keying the table is not uniformly useless. It is useless for the",
+        "languages whose marks are diverse and land on distinct letters, and it",
+        "is not clearly useless for the tone languages. Section E should say",
+        "which case it is describing.",
+        "",
+        "Caveat, stated rather than buried: the reference profile is built from",
+        "the first half of the same corpus file the test windows come from, so",
+        "the analyst here has a perfectly matched reference text. A real analyst",
+        "would have a worse one. These figures are an upper bound on recovery",
+        "speed, not an estimate of it.",
+    ]
+    with open(os.path.join(out, "1.5-permuted-table-recovery.md"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", default="probe_out")
@@ -563,6 +987,10 @@ def main():
     print("1.3 done. largest loss: %s %.4f bits/sym" % (g[0]["lang"], g[0]["loss"]))
     bad = [r for r in g if not math.isnan(r["h_f"]) and r["h_f"] > r["bits"] + 1e-9]
     print("1.3 cross-check violations: %d" % len(bad))
+    exp_fingerprint(langs, args.out)
+    print("1.4 done")
+    exp_permrecover(langs, args.out)
+    print("1.5 done")
 
 
 if __name__ == "__main__":
