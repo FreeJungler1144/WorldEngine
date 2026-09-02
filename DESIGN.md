@@ -157,12 +157,27 @@ alone — the no-self-encipherment property the double pass exists to destroy,
 handed straight back at a known index.
 
 The half-swap *tau(i) = (i + L/2) mod L* is an involution for even *L* and has
-no fixed index at all, since *i + L/2 = i* has no solution. It also closes a
-subtler weakness of reversal: reversal pairs a position with its mirror, so
-positions near the middle of a message paired with nearly identical rotor
-states, and the centre of every message was its weakest region. Under the
-half-swap every pairing is exactly *L/2* apart and no position is structurally
-weaker than any other.
+no fixed index at all, since *i + L/2 = i* has no solution. That is the whole
+of the argument for it, and it is worth being precise that it is the whole of
+it.
+
+A second argument was proposed and does not survive measurement: that reversal
+pairs positions near the middle with *nearly adjacent* rotor states, so the
+composite degenerates gradually and the centre of a message is a weak region
+rather than a weak point. Measured directly — how often *A_i* and *A_j* agree
+on a symbol, as a function of the lag *|i-j|*, over 4,000 positions and all 38
+symbols — the agreement rate is 0.0277 at lag 1 against a baseline of 1/37 =
+0.0270 for two independent fixed-point-free involutions, and lags 2 through
+1,024 scatter between 0.0264 and 0.0277. Lag 1 sits about 1.5 standard errors
+from the baseline and lag 16 sits about 1.6, so lag 1 is not distinguishable
+from any other lag. Adjacent rotor states are not measurably more alike than
+distant ones. Only lag 0 is special, where *A_i . A_i* is the identity by
+construction, and that is exactly the odd-length fixed point above.
+
+So reversal had one defect, not two: a single weak *index* at odd lengths, not
+a weak *region* at any length. The half-swap is still the right replacement,
+because it has no fixed index at any length and costs nothing, but it should
+not be credited with fixing a seam that was never there.
 
 **Odd-length bodies are rounded up to even.** The half-swap is only defined on
 an even length, so `encrypt()` appends one symbol drawn from the alphabet when

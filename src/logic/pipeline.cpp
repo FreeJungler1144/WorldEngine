@@ -107,11 +107,12 @@ std::string pad(const std::string& msg, const std::string& alpha, int base_noise
 // straight back at a known index.
 //
 // The half-swap has no fixed index at all — i + L/2 == i has no solution
-// mod L — and it pairs every position with one exactly L/2 away rather
-// than with its mirror. Reversal also made the centre of a message its
-// weakest region, since positions near the middle paired with nearly
-// identical rotor states; under the half-swap no position is closer to its
-// partner than any other.
+// mod L — which is the entire reason it replaced reversal. It is NOT the
+// case that reversal additionally degraded the middle of a message by
+// pairing it with nearly adjacent rotor states: measured, A_i and A_j
+// agree on a symbol at 0.0277 for lag 1 against a 1/37 = 0.0270 baseline,
+// indistinguishable from lags out to 1024. Reversal had one defect, the
+// fixed index, not a gradient around it.
 //
 // Requires an even length. encrypt() guarantees one.
 void half_swap(std::string& s) {
