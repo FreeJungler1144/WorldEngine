@@ -32,6 +32,40 @@ std::string random_notches(const Alphabet& alpha, int count);
 std::vector<std::string> random_variable_notches(const Alphabet& alpha, int rotor_count,
                                                    int max_notches_per_rotor);
 
+// ── wheel batches: built and validated in memory, written only if valid ─
+//
+// gen_wheels() used to inline all of this, which left the refusal path
+// unreachable from a test: the only way to see it was to break the OS
+// entropy source. The split is the seam that makes the guards in DESIGN
+// section 6 testable, and nothing about the behaviour changed with it.
+
+struct WheelBatch {
+    std::vector<std::string> lines;    // ready-to-write file lines
+    std::vector<std::string> wirings;  // the same wheels, for validation
+    bool rotors = true;
+};
+
+// Empty if the batch is fit to write, otherwise the reason, phrased for
+// the operator. A batch is unfit if two wheels share a wiring (a broken
+// entropy source) or if any wiring is a pure rotation of the alphabet (a
+// Caesar wheel, which load_wheel_file() would reject the whole file for).
+std::string wheel_batch_problem(const WheelBatch& b, const Suite& s);
+
+// Generate `count` wheels into memory. Runs entropy_self_check() first:
+// generation is the one moment where a dead entropy source is
+// unrecoverable, because its output looks plausible and is not.
+WheelBatch build_wheel_batch(const Suite& s, bool rotors, int count,
+                             const std::string& prefix, int start, int notch_n);
+
+// Write a batch, or refuse it. A batch with a problem is never written and
+// the target is left byte-identical, in BOTH modes. Overwrite is the worse
+// case and the reason this function exists: std::ios::trunc empties the
+// target at open, so validating after opening destroys the good wheels
+// being replaced as well as failing to write the bad ones.
+// Returns false and fills *error on refusal or I/O failure.
+bool write_wheel_batch(const std::string& path, const WheelBatch& b, const Suite& s,
+                       bool append, std::string* error);
+
 // ── settings generation ─────────────────────────────────────────────────
 
 struct GeneratedSettings {

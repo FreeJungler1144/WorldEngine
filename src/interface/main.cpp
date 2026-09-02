@@ -432,11 +432,54 @@ void verify_legacy_integrity() {
 }
 
 // ── self-test ───────────────────────────────────────────────────────────
+// ── key material must never be tracked by git ───────────────────────────
+//
+// A ratchet, not a remedy. Nothing is tracked today; this is what makes a
+// future `git add -f inop_keysheet.txt` loud instead of silent.
+//
+// Implemented by reading .git/index directly rather than shelling out to
+// git: no process spawn on a hot startup path, and no dependency on git
+// being installed. The index is the list of tracked paths, so a filename
+// appearing in it means exactly the thing being tested for.
+//
+// Two limits, stated rather than discovered later. A path stored under
+// index version 4 is prefix-compressed and could hide a name from this
+// scan, which fails open; version 4 is opt-in and rare. And a tracked file
+// whose path merely contains one of these names as a substring will trip
+// it, which fails closed. Of the two directions, that is the right one.
+std::vector<std::string> tracked_key_material() {
+    static const char* kNames[] = {"inop_wheels.txt", "inop_keysheet.txt", "inop.settings"};
+
+    std::string dir = ".";
+    std::string index;
+    for (int up = 0; up < 6; ++up) {
+        std::ifstream f(dir + "/.git/index", std::ios::binary);
+        if (f) {
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            index = ss.str();
+            break;
+        }
+        dir += "/..";
+    }
+
+    std::vector<std::string> found;
+    if (index.empty()) return found;  // not a checkout, or no index yet
+    for (const char* name : kNames)
+        if (index.find(name) != std::string::npos) found.push_back(name);
+    return found;
+}
+
 int self_test() {
     int failures = 0;
     auto check = [&](bool ok, const std::string& what) {
         std::cout << (ok ? GREEN : RED) << (ok ? "  ok   " : "  FAIL ") << RST << what << "\n";
-        if (!ok) ++failures;
+        // Flushed rather than buffered, because a later check can crash.
+        // Removing the floor from random_notches() makes a negative count
+        // index off the front of a vector, and the buffered FAIL from the
+        // check before it died with the process — which reads as "the
+        // guard is not covered" when the truth is the opposite.
+        if (!ok) { std::cout.flush(); ++failures; }
     };
 
     // 1. Historic Enigma vector: rotors I II III, reflector B, all rings 01,
@@ -941,6 +984,145 @@ int self_test() {
               "German u with diaeresis does not chain (no tone system)");
     }
 
+    // 12. One test per guard in DESIGN section 6. The governing rule is
+    //     that for every "do not remove" there must be a check that fails
+    //     when it is removed, and every check below has been verified by
+    //     deleting or inverting the thing it protects and watching it fail
+    //     by name. verify_legacy_integrity() was already the right shape;
+    //     nothing else copied it until now.
+    {
+        const Suite& s38 = suite("38");
+        Alphabet a38(s38.alphabet);
+        const std::string scratch = "inop_selftest_scratch.txt";
+
+        // G1. The entropy check runs BEFORE generation, not after. A batch
+        //     drawn from a dead source looks exactly like a good one, so
+        //     checking afterwards is checking nothing. Observed through a
+        //     counter rather than a mock: if the call is deleted from
+        //     build_wheel_batch(), this check fails.
+        unsigned long before = entropy_check_count();
+        WheelBatch good = build_wheel_batch(s38, true, 4, "SELFTESTG", 900, 2);
+        check(entropy_check_count() > before,
+              "entropy_self_check runs before wheel generation");
+        check(wheel_batch_problem(good, s38).empty(),
+              "a freshly generated batch passes its own validation");
+
+        // G2. A batch whose wirings are not all distinct is refused. This
+        //     is the guard that DESIGN section 6 asserted was working while
+        //     it was not (register item 35).
+        WheelBatch dup;
+        dup.rotors = true;
+        dup.wirings = {good.wirings[0], good.wirings[0]};
+        dup.lines = {good.lines[0], good.lines[0]};
+        check(!wheel_batch_problem(dup, s38).empty(),
+              "a batch with two identical wirings is refused");
+
+        // G3. A pure rotation of the alphabet is a Caesar wheel. Refused at
+        //     generation, so it never reaches disk to be refused on load.
+        std::string rot38;
+        for (size_t i = 1; i <= s38.alphabet.size(); ++i)
+            rot38 += s38.alphabet[i % s38.alphabet.size()];
+        WheelBatch caesar;
+        caesar.rotors = true;
+        caesar.wirings = {rot38};
+        caesar.lines = {"rotor SELFTESTROT " + rot38};
+        check(!wheel_batch_problem(caesar, s38).empty(),
+              "a batch containing a pure rotation is refused at generation");
+
+        // G4. Nothing is written before validation, append case: the target
+        //     must be byte-identical after a refusal.
+        const std::string sentinel = "# sentinel, must survive a refused batch\n";
+        {
+            std::ofstream f(scratch, std::ios::trunc);
+            f << sentinel;
+        }
+        auto slurp = [](const std::string& p) {
+            std::ifstream f(p, std::ios::binary);
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            return ss.str();
+        };
+        // Snapshot the bytes as they actually landed rather than comparing
+        // against the string that was written: an ofstream in text mode
+        // translates newlines on Windows, and a byte-identical check that
+        // trips over that is testing the platform, not the guard.
+        const std::string baseline = slurp(scratch);
+        std::string err;
+        check(!write_wheel_batch(scratch, dup, s38, /*append=*/true, &err),
+              "write_wheel_batch refuses an invalid batch in append mode");
+        check(slurp(scratch) == baseline,
+              "append refusal leaves the existing file byte-identical");
+
+        // G5. Overwrite is the worse case and the one that was not filed:
+        //     std::ios::trunc empties the target at open, so validating
+        //     after opening destroys the good wheels being replaced.
+        check(!write_wheel_batch(scratch, dup, s38, /*append=*/false, &err),
+              "write_wheel_batch refuses an invalid batch in overwrite mode");
+        check(slurp(scratch) == baseline,
+              "overwrite refusal leaves the existing file byte-identical");
+
+        // G6. Positive control. Without this, G4 and G5 would still pass if
+        //     write_wheel_batch refused everything unconditionally.
+        check(write_wheel_batch(scratch, good, s38, /*append=*/false, &err),
+              "write_wheel_batch does write a valid batch");
+        check(slurp(scratch) != baseline && slurp(scratch).find(good.wirings[0]) != std::string::npos,
+              "the written file actually contains the batch");
+
+        // G7. The wheel file is validated on LOAD, not only on generation,
+        //     so a bad file left on disk cannot poison a later session.
+        {
+            std::ofstream f(scratch, std::ios::trunc);
+            f << "rotor SELFTESTD1 " << good.wirings[0] << "\n";
+            f << "rotor SELFTESTD2 " << good.wirings[0] << "\n";
+        }
+        std::vector<std::string> problems;
+        check(load_wheel_file(scratch, &problems) == 0 && !problems.empty(),
+              "load_wheel_file rejects a file whose rotors share a wiring");
+        problems.clear();
+        {
+            std::ofstream f(scratch, std::ios::trunc);
+            f << "rotor SELFTESTROT " << rot38 << "\n";
+        }
+        check(load_wheel_file(scratch, &problems) == 0 && !problems.empty(),
+              "load_wheel_file rejects a file containing a rotation");
+        std::remove(scratch.c_str());
+
+        // G8. random_notches() clamps to a floor of one. A notch-less rotor
+        //     never advances the rotor to its left, which collapses the
+        //     period exactly as a fixed rotor would.
+        check(random_notches(a38, 0).size() == 1, "random_notches(0) still yields one notch");
+        check(random_notches(a38, -3).size() == 1, "random_notches(-3) still yields one notch");
+
+        // G9. apply_suite_lock() forces the Legacy restrictions off. Also
+        //     covered indirectly by verify_legacy_integrity(); stated here
+        //     directly so deleting one line of it is visible.
+        {
+            PipelineConfig cfg;
+            cfg.double_pass = true;
+            cfg.padding = true;
+            cfg.moving_reflector = true;
+            bool locked = apply_suite_lock(cfg, /*historic_lock=*/true, 5);
+            check(locked && !cfg.double_pass && !cfg.padding && !cfg.moving_reflector,
+                  "apply_suite_lock forces double pass, padding and moving reflector off");
+            PipelineConfig open_cfg;
+            open_cfg.double_pass = true;
+            open_cfg.padding = true;
+            open_cfg.moving_reflector = true;
+            bool unlocked = apply_suite_lock(open_cfg, /*historic_lock=*/false, 16);
+            check(!unlocked && open_cfg.double_pass && open_cfg.padding &&
+                      open_cfg.moving_reflector,
+                  "apply_suite_lock leaves a non-historic suite alone");
+        }
+
+        // G10. Key material must not be tracked by git. A ratchet, not a
+        //      remedy: nothing is tracked today and this is what keeps it
+        //      that way.
+        std::vector<std::string> tracked = tracked_key_material();
+        check(tracked.empty(),
+              tracked.empty() ? "no key material is tracked by git"
+                              : "KEY MATERIAL IS TRACKED BY GIT: " + tracked.front());
+    }
+
     rule();
     if (failures == 0) std::cout << GREEN << "all checks passed" << RST << "\n";
     else std::cout << RED << failures << " check(s) failed" << RST << "\n";
@@ -1131,6 +1313,23 @@ int main(int argc, char** argv) {
                       << RST << "\n";
         for (size_t i = 0; i < problems.size(); ++i)
             std::cout << RED << "  !! inop_wheels.txt: " << problems[i] << RST << "\n";
+    }
+
+    // Refuse loudly if key material has been committed. This is checked at
+    // startup rather than left to review because the failure is permanent:
+    // a wheel file or key sheet that reaches a public remote is compromised
+    // from that moment, and no later commit takes it back.
+    {
+        std::vector<std::string> tracked = tracked_key_material();
+        if (!tracked.empty()) {
+            std::cout << RED << "\n  !! KEY MATERIAL IS TRACKED BY GIT:" << RST << "\n";
+            for (const std::string& t : tracked)
+                std::cout << RED << "  !!   " << t << RST << "\n";
+            std::cout << "  !! These files are the secret. Anything they configured must be\n"
+                         "  !! treated as compromised: regenerate the wheels and the key sheet,\n"
+                         "  !! and discard traffic enciphered under them.\n";
+            return 1;
+        }
     }
 
     verify_legacy_integrity();

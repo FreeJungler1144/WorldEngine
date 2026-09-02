@@ -29,4 +29,11 @@ std::string secure_string(const std::string& alphabet, size_t n);
 // way. Throws with a description if the source looks degenerate.
 void entropy_self_check();
 
+// How many times entropy_self_check() has completed in this process.
+// Exists so a test can prove the check is still wired into the generation
+// path rather than merely present in the file: a guard nothing observes is
+// a guard that can be deleted without anything noticing. Not part of the
+// check itself, and nothing in the message path reads it.
+unsigned long entropy_check_count();
+
 }  // namespace inop

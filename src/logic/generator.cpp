@@ -235,6 +235,73 @@ std::string settings_to_text(const GeneratedSettings& g) {
 }
 
 // ── menu actions ────────────────────────────────────────────────────────
+std::string wheel_batch_problem(const WheelBatch& b, const Suite& s) {
+    std::set<std::string> distinct(b.wirings.begin(), b.wirings.end());
+    if (b.wirings.size() > 1 && distinct.size() < b.wirings.size())
+        return "only " + std::to_string(distinct.size()) + " distinct wirings out of " +
+               std::to_string(b.wirings.size()) + " - the entropy source is broken";
+    for (size_t i = 0; i < b.wirings.size(); ++i) {
+        if (wiring_is_rotation(b.wirings[i], s.alphabet)) {
+            return "wiring " + std::to_string(i + 1) +
+                   " came out a pure rotation of the alphabet, which is a Caesar wheel and "
+                   "never legitimate - the entropy source is suspect";
+        }
+    }
+    return "";
+}
+
+WheelBatch build_wheel_batch(const Suite& s, bool rotors, int count,
+                             const std::string& prefix, int start, int notch_n) {
+    // Before generation, not after. A batch drawn from a dead source looks
+    // exactly like a good one and would be discovered only by whoever
+    // tried to use it.
+    entropy_self_check();
+
+    Alphabet alpha(s.alphabet);
+    WheelBatch b;
+    b.rotors = rotors;
+    b.lines.reserve(static_cast<size_t>(count));
+    b.wirings.reserve(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        std::string name = prefix + std::to_string(start + i);
+        std::string w = rotors ? random_rotor_wiring(alpha) : random_reflector_wiring(alpha);
+        std::string line;
+        if (rotors) {
+            line = "rotor " + name + " " + w;
+            if (notch_n > 0) line += " " + random_notches(alpha, notch_n);
+        } else {
+            line = "reflector " + name + " " + w;
+        }
+        b.wirings.push_back(w);
+        b.lines.push_back(line);
+    }
+    return b;
+}
+
+bool write_wheel_batch(const std::string& path, const WheelBatch& b, const Suite& s,
+                       bool append, std::string* error) {
+    // Validate BEFORE the stream is opened. Not before it is written to -
+    // before it is opened, because opening for overwrite is itself
+    // destructive.
+    std::string problem = wheel_batch_problem(b, s);
+    if (!problem.empty()) {
+        if (error) *error = problem;
+        return false;
+    }
+    std::ofstream f(path, append ? std::ios::app : std::ios::trunc);
+    if (!f) {
+        if (error) *error = "cannot write " + path;
+        return false;
+    }
+    if (!append)
+        f << "# INOP wheel file\n# alphabet size decides which suite a wheel belongs to\n";
+    f << "# " << b.lines.size() << " " << (b.rotors ? "rotors" : "reflectors")
+      << " for " << s.name << "\n";
+    for (size_t i = 0; i < b.lines.size(); ++i) f << b.lines[i] << "\n";
+    f.close();
+    return true;
+}
+
 namespace {
 
 void gen_wheels(bool rotors) {
@@ -275,54 +342,16 @@ void gen_wheels(bool rotors) {
         }
     }
 
-    // Generate the whole batch in memory and validate it BEFORE opening the
-    // file. The old order wrote every wheel, closed the stream, and only
-    // then checked distinctness — so a batch it announced as discarded was
-    // sitting on disk exactly where it had been written, and in overwrite
-    // mode the previous wheel file had already been truncated away at open
-    // to make room for it. A guard that reports a broken entropy source
-    // after committing its output is not a guard.
-    std::vector<std::string> lines;
-    std::set<std::string> distinct;
-    std::string rotation_example;
-    lines.reserve(static_cast<size_t>(count));
-    for (int i = 0; i < count; ++i) {
-        std::string name = prefix + std::to_string(start + i);
-        std::string w = rotors ? random_rotor_wiring(alpha) : random_reflector_wiring(alpha);
-        distinct.insert(w);
-        if (rotation_example.empty() && wiring_is_rotation(w, s.alphabet)) rotation_example = name;
-        std::string line;
-        if (rotors) {
-            line = "rotor " + name + " " + w;
-            if (notch_n > 0) line += " " + random_notches(alpha, notch_n);
-        } else {
-            line = "reflector " + name + " " + w;
-        }
-        lines.push_back(line);
-    }
-
-    if (count > 1 && distinct.size() < static_cast<size_t>(count)) {
-        std::cout << "  !! only " << distinct.size() << " distinct wirings out of " << count
-                  << " — the entropy source is broken. Nothing was written; " << path
-                  << " is untouched.\n";
+    // Generation and validation both live in build_wheel_batch() /
+    // write_wheel_batch() now, so the refusal path is reachable from the
+    // self-test instead of only from a broken entropy source.
+    WheelBatch batch = build_wheel_batch(s, rotors, count, prefix, start, notch_n);
+    std::string err;
+    if (!write_wheel_batch(path, batch, s, append, &err)) {
+        std::cout << "  !! " << err << ".\n"
+                  << "  !! Nothing was written; " << path << " is untouched.\n";
         return;
     }
-    // A pure rotation of the alphabet is a Caesar wheel, and load_wheel_file()
-    // would reject the file for carrying one. Catching it here means the
-    // batch never reaches disk to be rejected later.
-    if (!rotation_example.empty()) {
-        std::cout << "  !! " << rotation_example << " came out a pure rotation of the alphabet,\n"
-                     "  !! which is a Caesar wheel and never legitimate. The entropy source is\n"
-                     "  !! suspect. Nothing was written; " << path << " is untouched.\n";
-        return;
-    }
-
-    std::ofstream f(path, append ? std::ios::app : std::ios::trunc);
-    if (!f) { std::cout << "  ! cannot write " << path << "\n"; return; }
-    if (!append) f << "# INOP wheel file\n# alphabet size decides which suite a wheel belongs to\n";
-    f << "# " << count << " " << what << " for " << s.name << "\n";
-    for (size_t i = 0; i < lines.size(); ++i) f << lines[i] << "\n";
-    f.close();
     std::cout << "  " << count << " " << what << " " << (append ? "appended to " : "written to ")
               << path << "\n";
 

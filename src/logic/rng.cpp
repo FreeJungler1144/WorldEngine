@@ -124,6 +124,12 @@ std::string secure_string(const std::string& alphabet, size_t n) {
     return out;
 }
 
+namespace {
+unsigned long g_entropy_checks = 0;
+}
+
+unsigned long entropy_check_count() { return g_entropy_checks; }
+
 void entropy_self_check() {
     // Thresholds here are set so a healthy OS entropy source clears them by
     // a wide margin — every one of them has a false-alarm probability below
@@ -210,6 +216,8 @@ void entropy_self_check() {
         throw std::runtime_error(
             "secure_below is not uniform: chi-square is " + std::to_string(draw_chi2) +
             " over 37 degrees of freedom (expected around 37)");
+
+    ++g_entropy_checks;
 }
 
 }  // namespace inop
