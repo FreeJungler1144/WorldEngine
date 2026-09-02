@@ -399,6 +399,18 @@ const DecodeTable& global_decode_table() {
 
 }  // namespace
 
+std::vector<std::pair<char, int>> declared_marks(const std::string& language) {
+    std::vector<std::pair<char, int>> out;
+    if (language.empty()) {
+        for (const auto& [key, _] : global_decode_table()) out.push_back(key);
+        return out;
+    }
+    auto it = decode_tables().find(language);
+    if (it == decode_tables().end()) return out;
+    for (const auto& [key, _] : it->second) out.push_back(key);
+    return out;
+}
+
 std::string fold_diacritics(const std::string& text, const std::string& language) {
     // Most languages never touch `text` before folding — building a full
     // copy just to hand it unchanged to apply_fold_table() was pure waste

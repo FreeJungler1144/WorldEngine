@@ -20,6 +20,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace inop {
@@ -52,5 +53,13 @@ std::string fold_diacritics(const std::string& text, const std::string& language
 // kept as-is. Unknown (letter, digit) pairs for the given language are left
 // untouched (best-effort — should not happen in normal operation).
 std::string resubstitute(const std::string& text, const std::string& language);
+
+// The (base letter, mark code) pairs a language declares — the same table
+// resubstitute() decodes with, exposed read-only. A `language` of "" gives
+// the merged global table, already minus the keys excluded for
+// cross-language collision. Offline measurement of the scheme needs the
+// declared grammar rather than one inferred from a sample of text; nothing
+// in the message path calls this.
+std::vector<std::pair<char, int>> declared_marks(const std::string& language);
 
 }  // namespace inop

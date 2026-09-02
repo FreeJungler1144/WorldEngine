@@ -86,7 +86,15 @@ add_executable(inop_benchmark
   src/benchmark-debug/benchmark_main.cpp
 )
 
-foreach(tgt inop inop_benchmark)
+# inop_langprobe dumps the folded symbol stream and the declared mark
+# grammar for offline analysis of the diacritic scheme. Same standing as
+# inop_benchmark: headless, offline, never linked into the live pipeline.
+add_executable(inop_langprobe
+  ${INOP_CORE_SOURCES}
+  src/benchmark-debug/langprobe_main.cpp
+)
+
+foreach(tgt inop inop_benchmark inop_langprobe)
   target_include_directories(${tgt} PRIVATE ${INOP_SRC_DIRS})
 
   if(MSVC)
