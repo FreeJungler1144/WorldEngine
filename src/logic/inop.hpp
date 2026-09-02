@@ -146,7 +146,15 @@ private:
 // ── Plugboard ───────────────────────────────────────────────────────────
 class Plugboard {
 public:
-    Plugboard() = default;
+    // No default constructor. A default-constructed Plugboard leaves map_
+    // empty, so map() returns nullptr and Machine::encipher() indexes
+    // straight through it -- an immediate segfault with no diagnostic.
+    // Nothing in the program ever built one; the first caller to try it
+    // was the bombe harness, which found it the hard way. Deleted rather
+    // than fixed, because an identity map needs an alphabet size and the
+    // default constructor has no alphabet to get it from. A plugboard with
+    // no pairs is Plugboard({}, alpha), which is a real object.
+    Plugboard() = delete;
     Plugboard(const std::vector<std::string>& pairs, const Alphabet& alpha);
 
     const uint8_t* map() const { return map_.data(); }

@@ -20,6 +20,10 @@ endif()
 #                      (main.cpp, batch.*) and the optional GUI (gui*.*).
 #   benchmark-debug/   the standalone throughput/correctness harness entry
 #                      point.
+#   bombe/             the offline cryptanalysis harness. An attack tool,
+#                      filed apart from the correctness harness because it
+#                      is a different kind of thing, and never linked into
+#                      anything that carries a message.
 # Every #include "foo.hpp" in the source stays a bare filename — no file
 # was touched to make this split, only the compiler's include path grew to
 # cover all four folders (see target_include_directories below).
@@ -28,6 +32,7 @@ set(INOP_SRC_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/settings
   ${CMAKE_CURRENT_SOURCE_DIR}/src/interface
   ${CMAKE_CURRENT_SOURCE_DIR}/src/benchmark-debug
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/bombe
 )
 
 # The optional GUI (GLFW + raw OpenGL + stb_truetype) is
@@ -101,7 +106,15 @@ add_executable(inop_langprobe
   src/benchmark-debug/langprobe_main.cpp
 )
 
-foreach(tgt inop inop_benchmark inop_langprobe)
+# inop_bombe attacks the machine. Same standing as the other harnesses:
+# offline, headless, manufactures its own key material and never reads or
+# writes any, and is never linked into the live message pipeline.
+add_executable(inop_bombe
+  ${INOP_CORE_SOURCES}
+  src/bombe/bombe_main.cpp
+)
+
+foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
   target_include_directories(${tgt} PRIVATE ${INOP_SRC_DIRS})
 
   if(MSVC)
@@ -161,7 +174,7 @@ add_custom_target(inop_source_rules ALL
   COMMENT "Checking INOP source rules (core purity, RNG purity)"
   VERBATIM
 )
-foreach(tgt inop inop_benchmark inop_langprobe)
+foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
   add_dependencies(${tgt} inop_source_rules)
 endforeach()
 
