@@ -443,6 +443,17 @@ std::string resubstitute(const std::string& text, const std::string& language) {
     std::string out;
     out.reserve(text.size());
     size_t i = 0, n = text.size();
+    // Tracks whether the thing just emitted ended a letter — either a
+    // plain letter passed through, or a base letter that has just
+    // absorbed its mark digits. mark_literal_digits() only ever inserts
+    // its '/' directly after a letter, but by the time the decoder
+    // reaches that '/' the letter may have been consumed along with its
+    // digits, leaving a digit as the previous input byte rather than a
+    // letter. Testing the input byte therefore missed every literal digit
+    // that followed an accented character: "ma2/5" decoded the "a2" into
+    // á, met the '/' with a digit behind it, and stranded the separator
+    // in the output as "má/5".
+    bool prev_ends_letter = false;
     while (i < n) {
         char c = text[i];
         bool is_letter = c >= 'a' && c <= 'z';
@@ -458,22 +469,26 @@ std::string resubstitute(const std::string& text, const std::string& language) {
             if (i + 2 < n && std::isdigit(static_cast<unsigned char>(text[i + 2]))) {
                 int two = (text[i + 1] - '0') * 10 + (text[i + 2] - '0');
                 if (const std::string* mark = find_mark({c, two})) {
-                    out += *mark; i += 3; continue;
+                    out += *mark; i += 3; prev_ends_letter = true; continue;
                 }
             }
             int one = text[i + 1] - '0';
             if (const std::string* mark = find_mark({c, one})) {
-                out += *mark; i += 2; continue;
+                out += *mark; i += 2; prev_ends_letter = true; continue;
             }
         }
-        if (is_letter && i + 1 < n && text[i + 1] == '/' && i + 2 < n &&
-            std::isdigit(static_cast<unsigned char>(text[i + 2]))) {
-            out += c;
-            out += text[i + 2];
-            i += 3;
+        // A '/' between a letter and a digit is the literal-digit
+        // separator: drop it and keep the digit. A '/' with no letter in
+        // front of it is a literal slash the operator typed, and stays.
+        if (c == '/' && prev_ends_letter && i + 1 < n &&
+            std::isdigit(static_cast<unsigned char>(text[i + 1]))) {
+            out += text[i + 1];
+            i += 2;
+            prev_ends_letter = false;
             continue;
         }
         out += c;
+        prev_ends_letter = is_letter;
         ++i;
     }
     return out;

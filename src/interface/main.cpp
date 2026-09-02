@@ -741,6 +741,33 @@ int self_test() {
               "digit collision: Chateau Latour 1964 (no false slash on a bare number)");
         check(encode("Côte d'Ivoire", "fra") == "co5te divoire",
               "digit collision: apostrophe dropped, no space inserted");
+
+        // A literal digit directly after an ACCENTED letter. The separator
+        // lands after the mark digit rather than after a bare letter, and
+        // resubstitute() used to arrive at it with a digit behind it
+        // instead of a letter, so the branch that strips it never fired
+        // and the '/' survived into human-readable output. Covered here
+        // across the four shapes a mark can take: one digit, the 0 slot
+        // for a genuinely distinct letter, a doubled slot, and a chain.
+        auto full = [&](const std::string& raw, const std::string& lang) {
+            return resubstitute(encode(raw, lang), lang);
+        };
+        struct LitRow { const char* lang; const char* raw; const char* folded; };
+        static const LitRow lit_rows[] = {
+            {"svk", "má5",       "ma2/5"},
+            {"fra", "café2",     "cafe2/2"},
+            {"pol", "łódź9", "l0o2dz2/9"},
+            {"yor", "ẹ2",        "e88/2"},
+            {"cmn", "lǜ4",       "lu64/4"},
+        };
+        for (const auto& r : lit_rows) {
+            std::string enc = encode(r.raw, r.lang);
+            check(enc == r.folded,
+                  std::string("literal digit after diacritic folds[") + r.lang + "] -> " + enc);
+            std::string back = full(r.raw, r.lang);
+            check(back == r.raw,
+                  std::string("literal digit after diacritic round trip[") + r.lang + "] -> " + back);
+        }
     }
 
     // 11. Exhaustive per-language diacritic round trip: every (letter,
