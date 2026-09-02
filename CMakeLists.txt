@@ -123,5 +123,22 @@ if(INOP_WITH_GUI)
   endif()
 endif()
 
+# ── source rules enforced at build time ─────────────────────────────────
+# DESIGN section 1 (the cipher core is a rotor machine and nothing else)
+# and the no-weak-randomness rule were both prose and nothing else. They
+# are checked here rather than in the test suite so that not running the
+# tests cannot skip them: every build of every target runs this first, and
+# a violation is a build failure naming the rule and quoting the line.
+add_custom_target(inop_source_rules ALL
+  COMMAND ${CMAKE_COMMAND}
+          -DINOP_SRC_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/src
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_source_rules.cmake
+  COMMENT "Checking INOP source rules (core purity, RNG purity)"
+  VERBATIM
+)
+foreach(tgt inop inop_benchmark inop_langprobe)
+  add_dependencies(${tgt} inop_source_rules)
+endforeach()
+
 enable_testing()
 add_test(NAME self_test COMMAND inop --self-test --no-color)
