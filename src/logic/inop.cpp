@@ -1,7 +1,6 @@
 #include "inop.hpp"
 
 #include <algorithm>
-#include <cctype>
 
 namespace inop {
 
@@ -21,9 +20,20 @@ Alphabet::Alphabet(std::string symbols)
     }
 }
 
+// ASCII only, and deliberately not std::toupper/std::tolower: those consult
+// the active locale. preprocess() folds a message one raw byte at a time,
+// and under a non-C locale a byte >= 0x80 — which is half of every accented
+// character an operator types — can fold into a different byte, breaking a
+// round trip on one machine that works on another. Neither alphabet holds a
+// symbol above 0x7f, so nothing up there has any business changing.
 char Alphabet::fold_case(char c) const {
-    return uppercase_ ? static_cast<char>(std::toupper(static_cast<unsigned char>(c)))
-                       : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (uppercase_) {
+        if (u >= 'a' && u <= 'z') return static_cast<char>(u - 'a' + 'A');
+    } else {
+        if (u >= 'A' && u <= 'Z') return static_cast<char>(u - 'A' + 'a');
+    }
+    return c;
 }
 
 std::string Alphabet::fold_case(const std::string& s) const {
@@ -181,7 +191,9 @@ void Machine::set_key(const std::string& master_key) {
     master_key_ = master_key;
     for (size_t i = 0; i < rotors_.size(); ++i)
         rotors_[i].set_position(alpha_.index(master_key[i]));
-    reflector_.rotate_to(master_key.back(), alpha_);
+    refl_start_ = alpha_.index(master_key.back());
+    refl_tick_ = 0;
+    reflector_.set_position(refl_start_);
 }
 
 // Stepping happens BEFORE the signal is sent, exactly as on the real machine.
@@ -211,7 +223,22 @@ void Machine::step_rotors() const {
             if (!rotors_[i].step()) break;
         }
     }
-    if (moving_reflector_) reflector_.step();
+    if (moving_reflector_) {
+        // Not a plain step. Stepping the reflector once per character is
+        // what the fast rotor already does, so the reflector position was
+        // a function of the fast rotor position and added no state at all.
+        // A counter one short of the alphabet is coprime with it, so the
+        // pair repeats on lcm(37, 38) = 1406 rather than 38. Still a gear
+        // turning once per keypress, just one with fewer teeth than the
+        // wheels beside it. 36 plain steps then a jump home, so the hot
+        // path keeps the single increment rather than a modulo.
+        if (++refl_tick_ == size_ - 1) {
+            refl_tick_ = 0;
+            reflector_.set_position(refl_start_);
+        } else {
+            reflector_.step();
+        }
+    }
 }
 
 std::string Machine::encipher(const std::string& text) const {

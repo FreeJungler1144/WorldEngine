@@ -74,7 +74,19 @@ const std::map<std::string, Suite>& suites() {
                      {"I", "II", "III", "IV", "V", "VI", "VII"},
                      {"A", "B", "C"},
                      true, true, 5}},
-        {"38", Suite{"38", "INOP-38", ALPHA38, 5, 10, 15, 3,
+        // max_notches is 5 rather than the 1 that maximises the period.
+        // Period is not the scarce resource: c notches on n rotors give
+        // 38*(38/c)^(n-1), so even 5 notches across 10 rotors leave roughly
+        // 3e9 — orders of magnitude past any message that will ever be sent.
+        // Rotor movement WITHIN one message is the scarce resource, and it
+        // runs the other way: rotor j steps about once every (38/c)^(j-1)
+        // characters. Measured over a 1000-character message, going from 3
+        // to 5 takes rotor 3 from 7 of its 38 positions to 18, and rotor 4
+        // from roughly half a step to two. Rotors 5 and beyond stay still
+        // either way — they are a secret static permutation, not a moving
+        // part. Spending an unreachable period on the rotors that can still
+        // be woken up is the right trade.
+        {"38", Suite{"38", "INOP-38", ALPHA38, 5, 10, 15, 5,
                      {"R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10"},
                      {"D", "E", "F", "G", "H"},
                      false, false, 16}},

@@ -54,8 +54,10 @@ rotor machine have looked like." Every design choice traces back to a real
 historic weakness — the double pass exists specifically to remove Enigmas
 fatal no-self-encipherment property that let Bletchley Park crib-drag;
 daily wheel regeneration removes the fixed-wiring assumption every
-Bletchley technique depended on; one notch per rotor maximizes the stepping
-period instead of shortening it. If you are curious how rotor cryptanalysis
+Bletchley technique depended on; the notch count is picked to keep as many
+rotors as possible actually turning inside a single message, rather than to
+stretch a period that was already longer than any message would ever reach.
+If you are curious how rotor cryptanalysis
 actually worked, or what a determined but period-honest redesign of Enigma
 would look like, that is what this project demonstrates. See DESIGN.md
 sections 2 and 5 for the full reasoning behind each of these.
@@ -133,6 +135,12 @@ work. Anything starting with `:` that is not a recognized command is
 refused rather than enciphered, so a mistyped command never quietly becomes
 a message.
 
+`:d` refuses a ciphertext containing anything outside the alphabet, naming
+the character and its position, rather than quietly discarding it. A hyphen
+picked up from a wrapped line is the common case, and under Legacy so is any
+digit. Dropping one would shift every position after it and hand back noise,
+so retyping the line is the only useful answer and the message says so.
+
 ### Whats inside, briefly
 
 A few features exist that are worth knowing about before you start, each
@@ -173,6 +181,22 @@ lowercase, Legacy stays uppercase) means anything generated under the old
 uppercase convention will fail validation and get rejected with a clear
 error rather than silently misbehaving. Regenerate it from the maintenance
 menu.
+
+Separately, **stored ciphertext does not carry across this version.** The
+transposition between the two passes of the double pass changed from a
+reversal to a half-swap, and the reflector now turns on its own counter, so
+the same setup sheet produces different ciphertext than it used to. Key
+sheets, wheel files, settings files and the wire format are all unaffected —
+only already-enciphered traffic is. Decipher anything you still need with the
+old build before upgrading. See DESIGN.md sections 5 and 7 for why both
+changes were made.
+
+One visible behaviour change comes with it: with **padding switched off**, a
+message whose body length is odd gets one extra symbol drawn from the
+alphabet before enciphering, because the half-swap needs an even length. That
+symbol comes back on the round trip as a single trailing character. With
+padding on — the default — it never happens, since padding already rounds the
+body to a whole number of blocks.
 
 ## Where to get help
 

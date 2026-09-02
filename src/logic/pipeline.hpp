@@ -12,7 +12,7 @@
 namespace inop {
 
 struct PipelineConfig {
-    bool double_pass = true;      // encipher, reverse, encipher again
+    bool double_pass = true;      // encipher, swap halves, encipher again
     bool padding = true;          // wrap in random cover traffic — this
                                    // hides message boundaries, not length:
                                    // padding scales with message size, so
@@ -61,11 +61,20 @@ public:
     // cfg.double_pass) plaintext into ciphertext. Encrypted::marker is
     // empty when padding is off; otherwise it is the boundary string
     // decrypt() needs back to find the real message inside the padding.
+    //
+    // Under the double pass the body is rounded up to an even length with
+    // one symbol drawn from the alphabet, because the half-swap between the
+    // two passes is only defined on an even length. Padding already
+    // produced an even body on its own; with padding off, that extra symbol
+    // has no marker to hide behind and comes back as one trailing symbol on
+    // the round trip.
     Encrypted encrypt(const std::string& plaintext);
 
     // Reverses encrypt(). Throws if cfg.padding is on and marker is empty —
     // a blank marker must fail loudly rather than hand back the raw
-    // noise-padded blob as if it were the message. Returned text has
+    // noise-padded blob as if it were the message — and, under the double
+    // pass, if the ciphertext length is odd, which encrypt() never produces
+    // and so means symbols went missing in transit. Returned text has
     // SPACE_SUB already mapped back to a literal space.
     std::string decrypt(const std::string& ciphertext, const std::string& marker);
 

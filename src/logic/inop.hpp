@@ -6,6 +6,7 @@
 // here has a mechanical analogue that could have existed in 1940.
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -37,8 +38,16 @@ public:
         if (i < 0) throw std::invalid_argument(std::string("symbol not in alphabet: ") + c);
         return i;
     }
-    // no-throw variant for hot paths where membership is already known
-    int index_unchecked(char c) const { return idx_[static_cast<uint8_t>(c)]; }
+    // No-throw variant for hot paths where membership is already known.
+    // "Already known" is a real precondition, not a hope: a symbol outside
+    // the alphabet answers -1 here, and every caller uses the answer as an
+    // index straight away. The assert makes a violated precondition stop a
+    // debug build at the call site instead of quietly reading out of bounds
+    // in a release one.
+    int index_unchecked(char c) const {
+        assert(idx_[static_cast<uint8_t>(c)] >= 0 && "symbol is not in this alphabet");
+        return idx_[static_cast<uint8_t>(c)];
+    }
 
     // True if this alphabet's letters are uppercase (detected once, from
     // the declared symbol string, at construction) — Legacy's alphabet is
@@ -193,6 +202,13 @@ private:
     int size_;
     bool moving_reflector_ = true;
     bool legacy_double_step_ = false;
+    // The reflector turns on its own counter, one tooth short of the
+    // alphabet, so its position is not merely a relabelling of the fast
+    // rotor position — see step_rotors(). refl_start_ is the orientation
+    // the master key sets and is real key material; refl_tick_ is how far
+    // the counter has run since the machine was last keyed or rewound.
+    int refl_start_ = 0;
+    mutable int refl_tick_ = 0;
 };
 
 }  // namespace inop

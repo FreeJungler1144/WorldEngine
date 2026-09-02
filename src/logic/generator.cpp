@@ -187,9 +187,18 @@ GeneratedSettings random_settings(const Suite& s, int rotor_count, int plug_pair
         for (int i = 0; i < rotor_count; ++i) g.notches.push_back(std::string());
     } else {
         int npr = notches_per_rotor < 1 ? 1 : notches_per_rotor;
-        size_t total_needed = static_cast<size_t>(rotor_count) * static_cast<size_t>(npr);
-        if (total_needed > alpha.str().size())
+        // Notch symbols are distinct across the whole machine, not merely
+        // within one rotor, so the alphabet is a hard ceiling on
+        // rotor_count * npr — 10 rotors cannot carry 5 notches each out of
+        // 38 symbols, only 3. Clamp to what the alphabet can actually
+        // supply instead of throwing: a caller asking for the most movement
+        // available wants the most this rotor count allows, not a refusal.
+        // The floor of 1 notch per rotor is the one thing that genuinely
+        // cannot be met by shrinking, so that stays a throw.
+        const int affordable = static_cast<int>(alpha.str().size()) / rotor_count;
+        if (affordable < 1)
             throw std::runtime_error("not enough alphabet symbols for every rotor to have distinct notches");
+        if (npr > affordable) npr = affordable;
         std::vector<char> pool = shuffled_alphabet(alpha.str());
         size_t used = 0;
         for (int i = 0; i < rotor_count; ++i) {
@@ -286,9 +295,24 @@ void gen_settings() {
     const Suite& s = ask_suite();
     int count = ask_int("how many key sheet entries", 360, 1, 10000);
     int plugs = ask_int("plugboard pairs per entry", s.max_plug_pairs / 2, 0, s.max_plug_pairs);
-    int notch_n = s.notches_are_fixed ? 0 : ask_int("notches per rotor", 1, 1, s.max_notches);
-    if (!s.notches_are_fixed && notch_n > 1)
-        std::cout << "  note: 1 notch per rotor gives the longest period; more shortens it\n";
+    int notch_n =
+        s.notches_are_fixed ? 0 : ask_int("notches per rotor", s.max_notches, 1, s.max_notches);
+    // Notches are distinct across the whole machine, so a high rotor count
+    // buys fewer of them per rotor. Say so before the sheet is written
+    // rather than letting the entries quietly carry fewer than asked.
+    if (!s.notches_are_fixed) {
+        const int affordable = static_cast<int>(s.alphabet.size()) / s.max_rotors;
+        if (notch_n > affordable)
+            std::cout << "  note: entries using more than "
+                      << (static_cast<int>(s.alphabet.size()) / notch_n)
+                      << " rotors will carry fewer notches than that — every notch symbol\n"
+                         "  in a machine is distinct, and the alphabet runs out first.\n";
+    }
+    if (!s.notches_are_fixed && notch_n < s.max_notches)
+        std::cout << "  note: fewer notches lengthen the period, but they also move\n"
+                     "  fewer rotors inside a single message. The period is already far\n"
+                     "  longer than any message will ever be, so the maximum is usually\n"
+                     "  the better pick.\n";
 
     // rotor count: fixed suites (Legacy) have nothing to ask; a ranged suite
     // (INOP-38) lets the operator pin one count or draw a fresh one per entry.

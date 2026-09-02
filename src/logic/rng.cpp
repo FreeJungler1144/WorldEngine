@@ -26,6 +26,8 @@
 
 #if !defined(_WIN32)
 #include <cstdio>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 namespace inop {
@@ -62,6 +64,21 @@ namespace {
 uint32_t next_uint32() {
     static std::vector<uint8_t> pool;
     static size_t pos = 0;
+#if !defined(_WIN32)
+    // A fork() after the pool is filled leaves parent and child holding the
+    // same buffered bytes, and neither has any way to notice: both go on to
+    // draw the same shuffles, which means the same wheels and the same key
+    // sheet. Discarding the pool whenever the pid changes costs one getpid()
+    // per draw and makes that impossible. Windows has no fork, so this is
+    // POSIX-only rather than conditional on anything else.
+    static pid_t owner = 0;
+    const pid_t self = getpid();
+    if (self != owner) {
+        pool.clear();
+        pos = 0;
+        owner = self;
+    }
+#endif
     if (pos + 4 > pool.size()) {
         pool.resize(4096);
         secure_bytes(pool.data(), pool.size());
@@ -108,33 +125,91 @@ std::string secure_string(const std::string& alphabet, size_t n) {
 }
 
 void entropy_self_check() {
-    // 1. raw bytes must not be constant, and must cover a decent spread
+    // Thresholds here are set so a healthy OS entropy source clears them by
+    // a wide margin — every one of them has a false-alarm probability below
+    // one in a billion — while a source that is merely "varied enough to
+    // look random at a glance" does not. The earlier limits (64 distinct
+    // bytes out of 4096, 15 distinct draws out of 512) were loose enough
+    // that a generator restricted to 20 symbols would have passed both.
+
+    // 1. Raw bytes: coverage, spread, and balance.
     const size_t N = 4096;
     std::vector<uint8_t> buf(N);
     secure_bytes(buf.data(), N);
-    bool seen[256] = {false};
+
+    int counts[256] = {0};
+    for (size_t i = 0; i < N; ++i) ++counts[buf[i]];
     int distinct = 0;
-    for (size_t i = 0; i < N; ++i)
-        if (!seen[buf[i]]) { seen[buf[i]] = true; ++distinct; }
-    if (distinct < 64)
+    for (int v = 0; v < 256; ++v) if (counts[v]) ++distinct;
+    // 4096 draws over 256 values leaves an expected 0.00003 values unseen,
+    // so a healthy source returns 256 essentially every time.
+    if (distinct < 250)
         throw std::runtime_error(
             "entropy source is degenerate: " + std::to_string(distinct) +
-            " distinct byte values in " + std::to_string(N) + " bytes (expected ~250)");
+            " distinct byte values in " + std::to_string(N) + " bytes (expected ~256)");
+
+    // Chi-square over the 256 byte values, 255 degrees of freedom: mean 255,
+    // standard deviation ~22.6. 500 is roughly eleven deviations out, and a
+    // source biased toward any small subset of byte values overshoots it by
+    // orders of magnitude — 20 usable values scores about 48,000.
+    const double expected = static_cast<double>(N) / 256.0;
+    double chi2 = 0.0;
+    for (int v = 0; v < 256; ++v) {
+        const double d = static_cast<double>(counts[v]) - expected;
+        chi2 += d * d / expected;
+    }
+    if (chi2 > 500.0)
+        throw std::runtime_error(
+            "entropy source is not uniform: byte-value chi-square is " + std::to_string(chi2) +
+            " over 255 degrees of freedom (expected around 255)");
+
+    // Monobit: 32,768 bits, expected 16,384 set, standard deviation ~90.5.
+    // Catches a source that covers every byte value but leans on one side of
+    // the bit distribution, which the value histogram alone can miss.
+    long ones = 0;
+    for (size_t i = 0; i < N; ++i) {
+        uint8_t b = buf[i];
+        while (b) { ones += b & 1; b = static_cast<uint8_t>(b >> 1); }
+    }
+    const long bits = static_cast<long>(N) * 8;
+    const long deviation = ones - bits / 2;
+    if (deviation > 600 || deviation < -600)
+        throw std::runtime_error(
+            "entropy source is not balanced: " + std::to_string(ones) + " set bits in " +
+            std::to_string(bits) + " (expected " + std::to_string(bits / 2) + " +/- 91)");
 
     // 2. secure_below must actually vary. This is the exact path that failed
     //    silently once: keys looked random while every shuffle returned 0.
     const int draws = 512;
-    bool hit[38] = {false};
-    int spread = 0;
+    int hits[38] = {0};
     for (int i = 0; i < draws; ++i) {
         uint32_t v = secure_below(38);
         if (v >= 38) throw std::runtime_error("secure_below returned out of range");
-        if (!hit[v]) { hit[v] = true; ++spread; }
+        ++hits[v];
     }
-    if (spread < 15)
+    int spread = 0;
+    for (int v = 0; v < 38; ++v) if (hits[v]) ++spread;
+    // Coupon collector says all 38 show up within about 162 draws; over 512
+    // the chance of even one going missing is around one in a million, so
+    // anything below 36 is a broken generator rather than bad luck.
+    if (spread < 36)
         throw std::runtime_error(
             "secure_below is degenerate: only " + std::to_string(spread) +
             " distinct values in " + std::to_string(draws) + " draws (expected 38)");
+
+    // Coverage alone would still pass a generator that hits all 38 values but
+    // heavily favours a few. Chi-square over 37 degrees of freedom: mean 37,
+    // standard deviation ~8.6, so 120 is about ten deviations out.
+    const double draw_expected = static_cast<double>(draws) / 38.0;
+    double draw_chi2 = 0.0;
+    for (int v = 0; v < 38; ++v) {
+        const double d = static_cast<double>(hits[v]) - draw_expected;
+        draw_chi2 += d * d / draw_expected;
+    }
+    if (draw_chi2 > 120.0)
+        throw std::runtime_error(
+            "secure_below is not uniform: chi-square is " + std::to_string(draw_chi2) +
+            " over 37 degrees of freedom (expected around 37)");
 }
 
 }  // namespace inop

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <random>
@@ -36,6 +37,9 @@ struct Args {
     std::string out = "benchmark.csv";
     std::string corpus_dir = "benchmark/corpus";
     std::string hamlet;  // path to a Hamlet corpus file; empty == skip
+    bool rotor_motion = false;   // run the rotor-movement survey instead
+    int motion_length = 1000;    // message length the survey measures over
+    int motion_trials = 8;       // random setups averaged per table cell
 };
 
 std::string next_val(int& i, int argc, char** argv) {
@@ -64,10 +68,18 @@ Args parse_args(int argc, char** argv) {
             a.corpus_dir = next_val(i, argc, argv);
         } else if (arg == "--hamlet") {
             a.hamlet = next_val(i, argc, argv);
+        } else if (arg == "--rotor-motion") {
+            a.rotor_motion = true;
+        } else if (arg == "--motion-length") {
+            a.motion_length = std::stoi(next_val(i, argc, argv));
+        } else if (arg == "--motion-trials") {
+            a.motion_trials = std::stoi(next_val(i, argc, argv));
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "inop_benchmark [--languages all|la,en,...] [--configs N] "
                          "[--messages N] [--out benchmark.csv] [--corpus-dir benchmark/corpus] "
-                         "[--hamlet path]\n";
+                         "[--hamlet path]\n"
+                         "inop_benchmark --rotor-motion [--motion-length N] "
+                         "[--motion-trials N]\n";
             std::exit(0);
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
@@ -211,10 +223,115 @@ Machine machine_from_generated(const GeneratedSettings& g) {
     return build_machine(s);
 }
 
+// ── rotor movement survey ───────────────────────────────────────────────
+//
+// How many distinct positions each wheel actually visits while one message
+// is being sent. This is the figure a notch count should be chosen against,
+// and it is not the same figure as the machine period: the period says how
+// long the machine takes to repeat itself, which it never gets near, while
+// this says how much of the machine is doing anything at all in the only
+// window that exists in practice. A rotor that visits one position over a
+// whole message is a static secret permutation, not a moving part.
+//
+// Positions are read straight off the machine after each character, so this
+// measures the real stepping code rather than a model of it.
+struct MotionRow {
+    std::vector<double> rotor;  // index 0 is the FAST rotor, counting leftward
+    double reflector = 0.0;
+};
+
+MotionRow measure_motion(const Suite& su, int rotor_count, int notch_count, int len, int trials) {
+    MotionRow row;
+    row.rotor.assign(static_cast<size_t>(rotor_count), 0.0);
+    for (int t = 0; t < trials; ++t) {
+        GeneratedSettings g = random_settings(su, rotor_count, 0, notch_count);
+        Machine m = machine_from_generated(g);
+        const size_t width = static_cast<size_t>(m.alphabet().size());
+
+        std::vector<std::vector<bool>> seen(static_cast<size_t>(rotor_count),
+                                             std::vector<bool>(width, false));
+        std::vector<bool> refl_seen(width, false);
+        auto sample = [&]() {
+            for (int i = 0; i < rotor_count; ++i)
+                seen[static_cast<size_t>(i)][static_cast<size_t>(
+                    m.rotors()[static_cast<size_t>(i)].position())] = true;
+            refl_seen[static_cast<size_t>(m.reflector().position())] = true;
+        };
+
+        sample();  // the starting position counts as visited
+        for (int k = 0; k < len; ++k) {
+            m.encipher(std::string(1, 'a'));  // one character, one step
+            sample();
+        }
+
+        for (int i = 0; i < rotor_count; ++i) {
+            int distinct = 0;
+            for (bool b : seen[static_cast<size_t>(i)]) if (b) ++distinct;
+            // Report fast-rotor-first: rotors_[rotor_count - 1] is the fast
+            // one, and "rotor 2 barely moves" is far easier to read than
+            // "rotor 9 barely moves" when the count itself varies.
+            row.rotor[static_cast<size_t>(rotor_count - 1 - i)] += distinct;
+        }
+        int refl_distinct = 0;
+        for (bool b : refl_seen) if (b) ++refl_distinct;
+        row.reflector += refl_distinct;
+    }
+    for (double& v : row.rotor) v /= trials;
+    row.reflector /= trials;
+    return row;
+}
+
+void run_rotor_motion_survey(int len, int trials) {
+    const Suite& su = suite("38");
+    std::cout << "rotor movement over a " << len << "-character message\n"
+              << "distinct positions visited, mean of " << trials
+              << " random INOP-38 setups per row\n"
+              << "r1 is the fast rotor; each rotor has " << su.alphabet.size()
+              << " positions available\n\n";
+
+    std::cout << " rotors  notches";
+    for (int i = 1; i <= su.max_rotors; ++i) std::cout << "     r" << i;
+    std::cout << "   reflector\n";
+
+    // The middle row matters: the distinct-notch rule means 5 notches per
+    // rotor is only reachable up to 7 rotors (7 * 5 = 35 <= 38), so a sweep
+    // of just the two ends would never show the proposed notch count at a
+    // high rotor count at all.
+    for (int rotor_count : {su.min_rotors, 7, su.max_rotors}) {
+        for (int notches = 1; notches <= su.max_notches; ++notches) {
+            // random_settings() clamps the notch count to what the
+            // alphabet can supply as distinct symbols across the whole
+            // machine, so at 10 rotors an ask of 5 really lands on 3.
+            // Print what the machine actually got, not what was asked.
+            const int effective =
+                std::min(notches, static_cast<int>(su.alphabet.size()) / rotor_count);
+            MotionRow row = measure_motion(su, rotor_count, notches, len, trials);
+            std::cout << std::setw(7) << rotor_count << std::setw(9) << effective;
+            if (effective != notches) std::cout << " (asked " << notches << ")";
+            else std::cout << "          ";
+            for (int i = 0; i < su.max_rotors; ++i) {
+                if (i < rotor_count)
+                    std::cout << std::setw(7) << std::fixed << std::setprecision(1)
+                              << row.rotor[static_cast<size_t>(i)];
+                else
+                    std::cout << std::setw(7) << "-";
+            }
+            std::cout << std::setw(12) << std::fixed << std::setprecision(1) << row.reflector
+                      << "\n";
+        }
+        std::cout << "\n";
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
+
+    if (args.rotor_motion) {
+        run_rotor_motion_survey(args.motion_length, args.motion_trials);
+        return 0;
+    }
 
     std::vector<std::string> languages = args.languages;
     if (languages.empty())

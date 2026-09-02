@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
+#include <string>
 
 #include "rng.hpp"
 
@@ -93,6 +94,31 @@ std::string pad(const std::string& msg, const std::string& alpha, int base_noise
            secure_string(alpha, static_cast<size_t>(back));
 }
 
+// The transposition applied between the two passes. It has to be an
+// involution or the double pass stops being self-inverse, and one setup
+// sheet would no longer work in both directions.
+//
+// std::reverse used to fill this role. Reversal is an involution, but it
+// fixes the middle index of an odd-length body, and at that index the
+// second pass applies the same per-position involution the first one did.
+// The two cancel: C[m] == P[m] exactly, on every message, at a position an
+// analyst can compute from the length alone. That is the
+// no-self-encipherment property the double pass exists to destroy, handed
+// straight back at a known index.
+//
+// The half-swap has no fixed index at all — i + L/2 == i has no solution
+// mod L — and it pairs every position with one exactly L/2 away rather
+// than with its mirror. Reversal also made the centre of a message its
+// weakest region, since positions near the middle paired with nearly
+// identical rotor states; under the half-swap no position is closer to its
+// partner than any other.
+//
+// Requires an even length. encrypt() guarantees one.
+void half_swap(std::string& s) {
+    const size_t h = s.size() / 2;
+    for (size_t i = 0; i < h; ++i) std::swap(s[i], s[i + h]);
+}
+
 std::string carve(const std::string& full, const std::string& marker) {
     size_t i = full.find(marker);
     size_t j = full.rfind(marker);
@@ -115,12 +141,13 @@ std::string Pipeline::run_pass(const std::string& text) {
     return machine_.encipher(text);
 }
 
-// encrypt()/decrypt() both run a pass, and — if double_pass is on — reverse
-// and run a second one. Was written out identically in both places.
+// encrypt()/decrypt() both run a pass, and — if double_pass is on — swap
+// the two halves and run a second one. Was written out identically in both
+// places.
 std::string Pipeline::run_double_pass(const std::string& text) {
     std::string s = run_pass(text);
     if (cfg_.double_pass) {
-        std::reverse(s.begin(), s.end());
+        half_swap(s);
         s = run_pass(s);
     }
     return s;
@@ -139,6 +166,17 @@ Encrypted Pipeline::encrypt(const std::string& plaintext) {
         body = preprocess(plaintext, machine_.alphabet());
     }
 
+    // The half-swap between the two passes needs an even body. Padding
+    // already delivers one — pad() rounds the body out to a whole number of
+    // blocks — but padding can be switched off, so the guarantee is made
+    // here rather than assumed from a setting the operator controls. The
+    // filler symbol is drawn from the alphabet like any other cover symbol
+    // rather than being a fixed one, so it carries no crib. With padding on
+    // it lands outside the trailing marker and carve() drops it; with
+    // padding off there is no marker to carve against, so it surfaces on
+    // the round trip as one extra symbol at the end.
+    if (cfg_.double_pass && body.size() % 2 != 0) body += secure_string(alpha, 1);
+
     result.ciphertext = run_double_pass(body);
     return result;
 }
@@ -148,6 +186,16 @@ std::string Pipeline::decrypt(const std::string& ciphertext, const std::string& 
     // noise-padded blob as if it were the message.
     if (cfg_.padding && marker.empty())
         throw std::runtime_error("a marker is required to decipher a padded message");
+
+    // encrypt() never emits an odd-length body under the double pass, so an
+    // odd one arriving here is a truncated or mistranscribed ciphertext. Say
+    // so instead of half-swapping a length the transform is not defined for
+    // and handing back plausible-looking garbage.
+    if (cfg_.double_pass && ciphertext.size() % 2 != 0)
+        throw std::runtime_error(
+            "ciphertext length must be even under the double pass — " +
+            std::to_string(ciphertext.size()) +
+            " symbols received, so at least one symbol is missing");
 
     std::string s = run_double_pass(ciphertext);
     if (cfg_.padding) s = carve(s, marker);

@@ -86,6 +86,34 @@ std::string lower(std::string s) {
     return s;
 }
 
+// Every symbol handed to the machine has to be a member of its alphabet.
+// The encrypt path guarantees that by running everything through
+// preprocess(); the decrypt path takes a ciphertext straight from the
+// operator and has no equivalent, so it checks here instead.
+// Machine::encipher() resolves symbols with Alphabet::index_unchecked(),
+// which answers -1 for a stranger and then indexes the plugboard and rotor
+// tables with it — reading outside both. Returns a description of the first
+// offending character, or an empty string if the text is clean.
+//
+// Rejecting is deliberate, and dropping the character would be worse than
+// useless: a ciphertext is positional, so one symbol removed shifts every
+// symbol after it and turns the rest of the message into noise the operator
+// has no way to diagnose. A hyphen picked up from a wrapped line is enough
+// to trigger it, and under Legacy so is any digit at all.
+std::string foreign_symbol(const std::string& text, const Alphabet& alpha) {
+    static const char* HEX = "0123456789abcdef";
+    for (size_t i = 0; i < text.size(); ++i) {
+        char raw = text[i];
+        if (alpha.contains(raw)) continue;
+        unsigned char c = static_cast<unsigned char>(raw);
+        std::string shown = c >= 0x20 && c < 0x7f
+                                ? std::string("\"") + raw + "\""
+                                : std::string("byte 0x") + HEX[c >> 4] + HEX[c & 0x0f];
+        return shown + " at position " + std::to_string(i + 1);
+    }
+    return std::string();
+}
+
 std::string ask(const std::string& prompt) {
     std::cout << CYAN << prompt << RST << " ";
     std::string line;
@@ -463,6 +491,10 @@ int self_test() {
     }
 
     // 4. The double pass removes Enigma's fatal no-self-encipherment property.
+    //    The body length here is ODD on purpose. An even length cannot show
+    //    the failure this section exists to catch: the transposition applied
+    //    between the two passes has to be free of fixed indices, and the old
+    //    std::reverse had exactly one whenever the length was odd.
     {
         Settings s;
         s.suite_code = "38";
@@ -471,6 +503,7 @@ int self_test() {
         s.rings = {1, 1, 1, 1, 1};
         s.notches = {"a", "b", "c", "d", "e"};
         s.master_key = "aaaaaa";
+        const size_t odd_len = 4001;
 
         auto self_hits = [&](bool double_pass) {
             Machine m = build_machine(s);
@@ -478,7 +511,7 @@ int self_test() {
             c.double_pass = double_pass;
             c.padding = false;
             Pipeline p(m, c);
-            std::string plain(4000, 'a');
+            std::string plain(odd_len, 'a');
             std::string ct = p.encrypt(plain).ciphertext;
             int hits = 0;
             for (size_t i = 0; i < plain.size(); ++i) if (ct[i] == plain[i]) ++hits;
@@ -489,6 +522,41 @@ int self_test() {
         check(single == 0, "single pass: letter never maps to itself (Enigma's flaw), hits=" +
                                std::to_string(single));
         check(doubled > 0, "double pass: self-mapping restored, hits=" + std::to_string(doubled));
+
+        // A chance self-hit is expected and welcome — that is the whole point
+        // of the double pass. A STRUCTURAL one is not: an index that
+        // self-enciphers under every plaintext is a crib handle at a known
+        // position, exactly what Enigma handed Bletchley. Intersecting the
+        // self-hit index sets of several unrelated plaintexts separates the
+        // two: a 1-in-38 coincidence does not survive sixteen intersections,
+        // a structural fixed point survives all of them.
+        //
+        // The draw alphabet deliberately excludes SPACE_SUB — preprocess()
+        // prunes a literal one, which would shorten the body and slide every
+        // index after it out of alignment with the plaintext being compared.
+        {
+            Machine m = build_machine(s);
+            PipelineConfig c;
+            c.double_pass = true;
+            c.padding = false;
+            Pipeline p(m, c);
+            const std::string draw = "abcdefghijklmnopqrstuvwxyz0123456789/";
+            std::vector<bool> universal(odd_len, true);
+            for (int trial = 0; trial < 16; ++trial) {
+                std::string plain = secure_string(draw, odd_len);
+                std::string ct = p.encrypt(plain).ciphertext;
+                for (size_t i = 0; i < odd_len; ++i)
+                    if (i >= ct.size() || ct[i] != plain[i]) universal[i] = false;
+            }
+            int structural = 0;
+            std::string where;
+            for (size_t i = 0; i < odd_len; ++i)
+                if (universal[i]) { ++structural; where += " " + std::to_string(i); }
+            check(structural == 0,
+                  "double pass: no index self-enciphers under every plaintext at an odd length, "
+                  "structural fixed points=" + std::to_string(structural) +
+                      (where.empty() ? "" : " at index" + where));
+        }
     }
 
     // 5. The Legacy lock: a 1939 machine cannot be given INOP features.
@@ -1107,7 +1175,7 @@ int main(int argc, char** argv) {
                   << "    output groups     " << active.block << " letters, as transmitted\n"
                   << RST;
     } else {
-        cfg.double_pass      = ask_toggle("double pass (encipher, reverse, encipher)", true);
+        cfg.double_pass      = ask_toggle("double pass (encipher, swap halves, encipher)", true);
         cfg.padding          = ask_toggle("padding and cover traffic", true);
         cfg.moving_reflector = ask_toggle("moving reflector", true);
         apply_suite_lock(cfg, false, active.block);
@@ -1172,8 +1240,25 @@ int main(int argc, char** argv) {
             }
             std::string clean;
             for (auto& t : toks) for (char c : active_alpha.fold_case(t)) clean += c;
+            std::string bad = foreign_symbol(clean, active_alpha);
+            if (!bad.empty()) {
+                fail("ciphertext contains " + bad + ", which is not in the " + active.name +
+                     " alphabet — nothing was deciphered");
+                std::cout << DIM << "  the alphabet is: " << active_alpha.str() << "\n"
+                          << "  retype or repaste the line; dropping the symbol would shift "
+                             "every position after it" << RST << "\n";
+                continue;
+            }
             std::string marker;
-            if (cfg.padding) marker = lower(ask("  marker"));
+            if (cfg.padding) {
+                marker = active_alpha.fold_case(ask("  marker"));
+                std::string bad_marker = foreign_symbol(marker, active_alpha);
+                if (!bad_marker.empty()) {
+                    fail("marker contains " + bad_marker + ", which is not in the " +
+                         active.name + " alphabet — nothing was deciphered");
+                    continue;
+                }
+            }
             try {
                 std::string plain = pipe.decrypt(clean, marker);
                 std::cout << GREEN << "  plain  " << RST << plain << "\n";

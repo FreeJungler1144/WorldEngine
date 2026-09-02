@@ -96,6 +96,15 @@ in another language.
 **Legacy silently drops symbols outside its alphabet.** Historically accurate
 and the motivating example for INOP-38.
 
+**A ciphertext carrying a symbol outside the alphabet is refused, not cleaned
+up.** Plaintext going the other way is laundered through `preprocess()`, which
+drops what the machine has no key for, and that is the right answer there. It is
+the wrong answer for a ciphertext: ciphertext is positional, so a dropped symbol
+shifts every symbol after it and the message decodes to noise with nothing to
+say why. The decrypt prompt therefore names the offending character and
+deciphers nothing. A hyphen picked up from a wrapped line is enough to trigger
+it, and under Legacy so is any digit.
+
 **Spaces are enciphered as `#`.** This is a usability feature, not a security
 one. It is understood that the space is the most frequent symbol in English
 (~17.6%) and that including it *helps* an analyst. Sentences and dates
@@ -128,23 +137,118 @@ an operator typing.
 
 ## 5. Decisions with non-obvious rationale
 
-**The double pass** (encipher → reverse → encipher from a rewound state) is
-the single most important line in the pipeline. Enigma's reflector guarantees
-a letter never enciphers to itself, which is what let Bletchley crib-drag. The
-reversal makes ciphertext position *i* depend on plaintext position *L−1−i*,
-destroying that guarantee while keeping the whole-message map self-inverse.
-Removing the reversal turns the double pass into an identity function.
+**The double pass** (encipher → swap halves → encipher from a rewound state)
+is the single most important line in the pipeline. The Enigma reflector
+guarantees a letter never enciphers to itself, which is what let Bletchley
+crib-drag. Transposing the message between the two passes makes ciphertext
+position *i* depend on plaintext position *tau(i)* instead, destroying that
+guarantee while keeping the whole-message map self-inverse. Removing the
+transposition turns the double pass into an identity function.
+
+**Why the transposition is a half-swap rather than a reversal.** Whatever
+transposition sits between the two passes has to be an involution, or the
+whole-message map stops being self-inverse and one setup sheet no longer works
+in both directions. Reversal qualifies, and was what the pipeline used. But
+reversal fixes the middle index of an odd-length body, and at that index the
+second pass applies the same per-position involution the first one did. The two
+cancel. The ciphertext symbol there equals the plaintext symbol exactly, on
+every odd-length message, at a position an analyst can compute from the length
+alone — the no-self-encipherment property the double pass exists to destroy,
+handed straight back at a known index.
+
+The half-swap *tau(i) = (i + L/2) mod L* is an involution for even *L* and has
+no fixed index at all, since *i + L/2 = i* has no solution. It also closes a
+subtler weakness of reversal: reversal pairs a position with its mirror, so
+positions near the middle of a message paired with nearly identical rotor
+states, and the centre of every message was its weakest region. Under the
+half-swap every pairing is exactly *L/2* apart and no position is structurally
+weaker than any other.
+
+**Odd-length bodies are rounded up to even.** The half-swap is only defined on
+an even length, so `encrypt()` appends one symbol drawn from the alphabet when
+the body would otherwise be odd. With padding on this never fires — `pad()`
+already rounds the body out to a whole number of blocks. With padding off it
+does, and since there are no markers to carve against in that mode, that symbol
+surfaces on the round trip as one extra symbol at the end. That is accepted. It
+is also why the filler is drawn at random instead of being a fixed sentinel,
+which would be a crib sitting at a known position. In the other direction,
+`decrypt()` refuses an odd-length ciphertext outright when the double pass is
+on: `encrypt()` cannot produce one, so an odd length means symbols went missing
+in transit, and saying so beats handing back plausible noise.
+
+One consequence worth stating plainly: this changes the ciphertext a given
+setup produces. Traffic enciphered by an earlier build will not decipher under
+this one. Nothing else moved — the alphabet, the wire format, the marker scheme
+and existing key sheets are all unaffected.
 
 **Daily wheel regeneration** is the other structural defence. Bletchley never
 had to solve Enigma's wiring — the Poles obtained it in 1932, and every
 technique afterwards assumed it as a known constant. Regenerating wheels daily
 removes that constant, which is why a bombe has nothing to grip.
 
-**One notch per rotor maximises the period.** More notches make carries fire
-more often and *shorten* it. Measured on 3 rotors: 1 notch gives 54,872 (=38³,
-the ceiling), 2 or 3 give 13,718, 19 gives 152. Zero and "all" both collapse to
-38. The `max_notches` setting is a key-space/period tradeoff, not a safety
-rail.
+**Notches are chosen for movement inside one message, not for period.** One
+notch per rotor does maximise the period, and the measured numbers are correct:
+on 3 rotors, 1 notch gives 54,872 (=38³, the ceiling), 2 or 3 give 13,718, 19
+gives 152, and zero or "all" both collapse to 38. The general form is
+*38 × (38/c)^(n−1)* for *c* notches on *n* rotors. Those numbers were being read
+as the objective, and they are not it.
+
+The period is not the scarce resource. Even 5 notches across 10 rotors leave
+roughly 3×10⁹, and 3 notches leave roughly 3×10¹¹ — both are past any message that
+will ever be sent by orders of magnitude, so the difference between them buys
+nothing. What is scarce is how much of the machine moves *while a single message
+is being sent*. Rotor *j* steps about once every *(38/c)^(j−1)* characters, so a
+low notch count freezes the slow rotors solid.
+
+Measured with `inop_benchmark --rotor-motion`: distinct positions visited over a
+1,000-character message, r1 being the fast rotor, 38 positions available to
+each, mean of 16 random setups.
+
+| rotors | notches | r1 | r2 | r3 | r4 | r5 | r6-r10 |
+|---|---|---|---|---|---|---|---|
+| 5 | 1 | 38.0 | 27.4 | 1.6 | 1.0 | 1.0 | — |
+| 5 | 3 | 38.0 | 38.0 | 7.2 | 1.4 | 1.1 | — |
+| 5 | 5 | 38.0 | 38.0 | 18.2 | 3.0 | 1.1 | — |
+| 7 | 3 | 38.0 | 38.0 | 7.2 | 1.6 | 1.0 | 1.0 |
+| 7 | 5 | 38.0 | 38.0 | 18.1 | 3.5 | 1.4 | 1.0 |
+| 10 | 3 | 38.0 | 38.0 | 7.1 | 1.2 | 1.0 | 1.0 |
+
+The default is therefore 5 notches per rotor rather than the old 3, and
+`max_notches` for INOP-38 is 5. Raising it turns rotor 3 from a wheel that sees
+7 of its 38 positions into one that sees 18, and moves rotor 4 from about half a
+step per message to about two. `max_notches` still works as a setting, and
+`random_notches()` still enforces a floor of one — a notch-less rotor never
+advances the rotor to its left, which collapses the period the same way a fixed
+rotor would.
+
+**What this does not fix, stated plainly.** Rotor 4 makes roughly two steps in a
+thousand characters even at 5 notches, and rotors 5 through 10 do not move at
+all. Ten rotors does not mean ten moving parts, and the phrase should not be
+used as though it did. Those wheels are not dead weight: with wirings
+regenerated daily they are a secret static permutation, which is real key
+material against an analyst who does not know the wiring. But they contribute
+statically, not dynamically, and no amount of notch tuning within the cap
+changes that.
+
+**The cap of 5 is not reachable at every rotor count.** Notch symbols are
+distinct across the whole machine, not merely within one rotor, because two
+rotors sharing a notch symbol measurably shrinks the keyspace. The 38-symbol
+alphabet is therefore a hard ceiling on *rotor count × notches*: 5 notches each
+is available up to 7 rotors, 4 up to 9, and 3 at 10. `random_settings()` clamps
+to what the alphabet can supply rather than refusing to generate, and the key
+sheet generator says so before it writes.
+
+If the cap of 5 is ever revisited, the precedent for many notches is Enigma
+itself — the Abwehr Enigma G used wheels with 11, 15 and 17 notches, so a higher
+cap would not be un-Enigma.
+
+**The leftmost rotor ring setting is redundant.** Nothing sits to the left of it
+to receive a carry, so changing its ring is equivalent to changing its starting
+position and adds no key beyond it. This is the classic Enigma result and it
+holds here for the same reason. No keyspace figure in this repository currently
+claims otherwise — the only combinatorial figure quoted anywhere is the
+plugboard one below, which is unaffected — but any future one has to divide by
+38 to account for it.
 
 **15 plugboard pairs is both the maximum and the optimum** for a 38-symbol
 alphabet (2⁷⁸·⁰). Beyond the peak the count falls, mirroring the historical
@@ -162,8 +266,18 @@ already happened once, producing 100 rotors that were all the same shift
 cipher.
 
 - `entropy_self_check()` — runs at startup, before generation, and in the
-  self-test. 4096 raw bytes must show normal spread; 512 draws of
-  `secure_below(38)` must actually vary.
+  self-test. 4096 raw bytes must cover at least 250 of the 256 byte values,
+  score under 500 on a chi-square over those values (255 degrees of freedom,
+  mean 255), and land within 600 set bits of the expected 16,384 on a monobit
+  count. 512 draws of `secure_below(38)` must cover at least 36 of the 38
+  values and score under 120 on their own chi-square (37 degrees of freedom).
+  Every one of those limits has a false-alarm probability below one in a
+  billion on a healthy source. The earlier limits — 64 distinct bytes of 4096,
+  15 distinct draws of 512 — only caught total failure: a generator restricted
+  to 20 symbols passed both of them, which is exactly the kind of quiet
+  breakage this guard exists for. The rejection bounds in `secure_below()` and
+  `secure_string()` are separately correct and unbiased, and are not part of
+  what was tightened.
 - Rotor wirings that are a pure rotation of the alphabet are rejected. That is
   a Caesar rotor, and five in series still compose to one.
 - The rotation check ranks symbols by their position in the **declared**
@@ -194,16 +308,31 @@ and `*.settings` are in `.gitignore`.
 
 Genuine, unresolved, and welcome:
 
-1. **Reflector motion adds no period.** It advances once per character, as does
-   the fast rotor, so its position is pinned to the fast rotor's and adds no
-   state. Fixes: give it its own counter on a modulus coprime to 38 (37 gives
-   ×37), or nest it at the end of the odometer. Its *starting* orientation is
-   real key material either way.
-2. **The master key is reused for a whole session.** Every message sent under
+1. **The master key is reused for a whole session.** Every message sent under
    one key is in depth with every other. A per-message indicator protocol is
    the right fix. This is the owner's decision and is deliberately unassigned.
 
 Resolved since the last pass, kept here for history:
+
+- ~~Reflector motion adds no period~~ — fixed. The reflector used to advance
+  one position per character, which is exactly what the fast rotor does, so its
+  position was a relabelling of the fast rotor position and contributed no state
+  at all. It now runs on its own counter one tooth short of the alphabet: 37 of
+  its 38 orientations, so the reflector and the fast rotor repeat together on
+  lcm(37, 38) = 1406 rather than 38, multiplying the machine period by 37.
+  Changing the step *size* would not have helped — any motion driven by the same
+  per-character count is a function of *k mod 38*, so the modulus is the thing
+  that had to change. Mechanically it is still a gear turning once per keypress,
+  just one with fewer teeth than the wheels beside it, which keeps it inside the
+  rule in section 1. Implemented as 36 plain steps followed by a jump back to
+  the keyed orientation, so the hot path costs the same single increment it
+  always did. The starting orientation is still real key material and still
+  comes from the last symbol of the master key. Confirmed by
+  `inop_benchmark --rotor-motion`, which reports the reflector visiting 37.0
+  distinct positions over a 1,000-character message. The alternative in the
+  original note — nesting the reflector at the end of the odometer — was not
+  taken: it buys period without buying any movement inside a message, which is
+  the resource section 5 establishes is actually scarce.
 
 - ~~Interactive notch entry accepted a blank~~ — fixed, and tightened
   further: the hand-entry prompt now requires at least one notch symbol,
@@ -227,9 +356,24 @@ Resolved since the last pass, kept here for history:
 
 Accepted or open, but already identified — no need to report these again:
 
-- `Machine::encipher` is `const` while mutating `mutable` rotor state.
+- `Machine::encipher` is `const` while mutating `mutable` rotor state, and now
+  the reflector counter as well.
 - `rng.cpp`'s POSIX branch holds a static `FILE*` that is never closed and is
-  not thread-safe. Single-threaded program.
+  not thread-safe. Single-threaded program. The separate fork-safety problem in
+  the same file is fixed: the buffered entropy pool used to survive a `fork()`
+  intact, so parent and child drew identical bytes and therefore identical
+  wheels and key sheets, with nothing to notice it. The pool is now discarded
+  whenever the pid changes. That branch does not compile or run on the
+  development machine, which is Windows, so it is reviewed but not exercised.
+- The optional GUI still shows three notch boxes per rotor (`kNotchBoxes` in
+  `gui_setup_panel.hpp`), which was written to match the INOP-38 `max_notches`
+  value back when that was 3. Now that the cap is 5, the Generate Setup button
+  draws up to 5 notches per rotor and then copies only the first 3 into the
+  editable boxes. The resulting setup is valid and round-trips; it simply
+  carries fewer notches than were drawn. Fixing it is the one-line change
+  `kNotchBoxes = 5` plus whatever the panel layout needs to fit two more boxes,
+  and it was left alone here only because this pass was scoped to exclude the
+  GUI.
 - `std::exit()` inside `ask()` bypasses destructors.
 - `main.cpp` is long and could be split.
 - `carve()` (pipeline.cpp) uses `find`/`rfind`; a marker sequence occurring by
