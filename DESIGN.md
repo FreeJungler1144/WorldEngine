@@ -300,7 +300,21 @@ cipher.
   be in ASCII order, which is exactly what let that distinction go unnoticed
   once. It lives in a single shared function so the generator and the loader
   can never diverge on it again.
-- A batch whose wirings are not all distinct is discarded, not written.
+- A batch whose wirings are not all distinct is discarded, not written, and
+  that sentence is now literally true. It used to be false: `gen_wheels()`
+  wrote every wheel, closed the file, and only then checked distinctness, at
+  which point it printed "output discarded" and returned while the batch sat
+  on disk exactly where it had been written. In overwrite mode the previous
+  wheel file had already been truncated away at open to make room for it, so
+  a failed check cost the operator the good wheels as well. The batch is now
+  built in memory and validated before the file is opened at all, so a
+  refusal leaves whatever was there untouched. A guard that reports a broken
+  entropy source after committing its output is not a guard.
+- A batch containing a pure rotation is refused at generation, not merely
+  rejected later on load, for the same reason.
+- Appending to a wheel file that already fails validation is refused.
+  `load_wheel_file()` throws out an entire file on one duplicate or rotation,
+  so appending good wheels to a bad file only buries them.
 - `inop_wheels.txt` is validated on **load**, not only on generation, so a bad
   file left on disk cannot poison later sessions.
 - `random_notches()` clamps to a minimum of one.

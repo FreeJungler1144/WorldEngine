@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "registry.hpp"
 #include "rng.hpp"
@@ -254,30 +255,74 @@ void gen_wheels(bool rotors) {
     std::string mode = ask("(a)ppend or (o)verwrite", "a");
     bool append = !mode.empty() && (mode[0] == 'a' || mode[0] == 'A');
 
-    std::ofstream f(path, append ? std::ios::app : std::ios::trunc);
-    if (!f) { std::cout << "  ! cannot write " << path << "\n"; return; }
-    if (!append) f << "# INOP wheel file\n# alphabet size decides which suite a wheel belongs to\n";
-    f << "# " << count << " " << what << " for " << s.name << "\n";
+    // Appending to a file that is already rejected as a whole would bury
+    // good wheels behind bad ones: load_wheel_file() throws out an entire
+    // file on a single duplicate or rotation, so one degenerate batch
+    // already sitting in there invalidates everything appended after it
+    // too. Checked before anything is generated, so a refusal costs
+    // nothing. A file that does not exist yet reports no problems.
+    if (append) {
+        std::vector<std::string> problems;
+        load_wheel_file(path, &problems);
+        if (!problems.empty()) {
+            std::cout << "  !! " << path << " does not pass validation as it stands:\n";
+            for (size_t i = 0; i < problems.size(); ++i)
+                std::cout << "     " << problems[i] << "\n";
+            std::cout << "  !! appending cannot fix that — every wheel in the file, old and\n"
+                         "  !! new, is rejected together on load. Overwrite it, or write to a\n"
+                         "  !! fresh path instead.\n";
+            return;
+        }
+    }
 
+    // Generate the whole batch in memory and validate it BEFORE opening the
+    // file. The old order wrote every wheel, closed the stream, and only
+    // then checked distinctness — so a batch it announced as discarded was
+    // sitting on disk exactly where it had been written, and in overwrite
+    // mode the previous wheel file had already been truncated away at open
+    // to make room for it. A guard that reports a broken entropy source
+    // after committing its output is not a guard.
+    std::vector<std::string> lines;
     std::set<std::string> distinct;
+    std::string rotation_example;
+    lines.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
         std::string name = prefix + std::to_string(start + i);
         std::string w = rotors ? random_rotor_wiring(alpha) : random_reflector_wiring(alpha);
         distinct.insert(w);
+        if (rotation_example.empty() && wiring_is_rotation(w, s.alphabet)) rotation_example = name;
+        std::string line;
         if (rotors) {
-            f << "rotor " << name << " " << w;
-            if (notch_n > 0) f << " " << random_notches(alpha, notch_n);
-            f << "\n";
+            line = "rotor " + name + " " + w;
+            if (notch_n > 0) line += " " + random_notches(alpha, notch_n);
         } else {
-            f << "reflector " << name << " " << w << "\n";
+            line = "reflector " + name + " " + w;
         }
+        lines.push_back(line);
     }
-    f.close();
+
     if (count > 1 && distinct.size() < static_cast<size_t>(count)) {
         std::cout << "  !! only " << distinct.size() << " distinct wirings out of " << count
-                  << " — the entropy source is broken, output discarded\n";
+                  << " — the entropy source is broken. Nothing was written; " << path
+                  << " is untouched.\n";
         return;
     }
+    // A pure rotation of the alphabet is a Caesar wheel, and load_wheel_file()
+    // would reject the file for carrying one. Catching it here means the
+    // batch never reaches disk to be rejected later.
+    if (!rotation_example.empty()) {
+        std::cout << "  !! " << rotation_example << " came out a pure rotation of the alphabet,\n"
+                     "  !! which is a Caesar wheel and never legitimate. The entropy source is\n"
+                     "  !! suspect. Nothing was written; " << path << " is untouched.\n";
+        return;
+    }
+
+    std::ofstream f(path, append ? std::ios::app : std::ios::trunc);
+    if (!f) { std::cout << "  ! cannot write " << path << "\n"; return; }
+    if (!append) f << "# INOP wheel file\n# alphabet size decides which suite a wheel belongs to\n";
+    f << "# " << count << " " << what << " for " << s.name << "\n";
+    for (size_t i = 0; i < lines.size(); ++i) f << lines[i] << "\n";
+    f.close();
     std::cout << "  " << count << " " << what << " " << (append ? "appended to " : "written to ")
               << path << "\n";
 
