@@ -11,13 +11,17 @@
 #include <vector>
 
 #include "gui_widgets.hpp"
+#include "registry.hpp"
 
 namespace inop {
 namespace gui {
 
 constexpr int kMaxRotors = 10;
 constexpr int kMaxPlugSlots = 15;
-constexpr int kNotchBoxes = 3;  // matches INOP-38's max_notches, the largest of any suite
+// Not a number of its own: the notch field is as wide as the widest cap
+// any suite declares, defined once in registry.hpp. Writing 3 here is what
+// made the panel truncate five-notch rotors to three.
+constexpr int kNotchBoxes = kMaxNotchesAnySuite;
 
 struct RotorRow {
     std::string rotor_name;

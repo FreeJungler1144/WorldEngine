@@ -176,6 +176,18 @@ bool wiring_is_rotation(const std::string& wiring, const std::string& alphabet) 
     return true;
 }
 
+std::string duplicate_notch_symbols(const std::vector<std::string>& notches_per_rotor) {
+    int seen[256] = {};
+    for (const std::string& rotor : notches_per_rotor)
+        for (unsigned char c : rotor) ++seen[c];
+    std::string out;
+    for (const std::string& rotor : notches_per_rotor)
+        for (unsigned char c : rotor)
+            if (seen[c] > 1 && out.find(static_cast<char>(c)) == std::string::npos)
+                out += static_cast<char>(c);
+    return out;
+}
+
 int load_wheel_file(const std::string& path, std::vector<std::string>* problems) {
     std::ifstream f(path);
     if (!f) return 0;

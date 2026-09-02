@@ -138,25 +138,22 @@ FieldValidity derive_validity(const PanelState& state) {
     }
 
     // A notch symbol may be used at most once anywhere in the active set —
-    // not just within one rotor's own three boxes (a rotor can't sensibly
-    // notch on the same letter twice) but across different rotors too
-    // (two rotors sharing a notch measurably shrinks the keyspace and
-    // opens a cryptanalytic angle, not just a UX nicety). Counted globally
-    // rather than per-row so both "same rotor" and "different rotor"
-    // collisions are caught the same way.
+    // not just within one rotor's own boxes (a rotor cannot sensibly notch
+    // on the same letter twice) but across different rotors too. The rule
+    // itself lives in duplicate_notch_symbol() in the logic layer, where
+    // the generator's own version of it also lives; this panel used to
+    // carry a second, independent implementation of a cryptographic
+    // validity rule, which is the failure the rotation check already went
+    // through once.
     if (!su.notches_are_fixed) {
-        int notch_count[256] = {};
+        std::vector<std::string> per_rotor;
+        per_rotor.reserve(static_cast<size_t>(state.rotor_count));
         for (int i = 0; i < state.rotor_count; ++i)
-            for (const auto& box : state.rotor_rows[i].notch_box)
-                if (!box.empty()) notch_count[static_cast<unsigned char>(box[0])]++;
-        for (int i = 0; i < state.rotor_count; ++i) {
-            for (const auto& box : state.rotor_rows[i].notch_box) {
-                if (!box.empty() && notch_count[static_cast<unsigned char>(box[0])] > 1) {
-                    v.notch_ok[i] = false;
-                    break;
-                }
-            }
-        }
+            per_rotor.push_back(notch_text(state.rotor_rows[i]));
+        std::string clashes = duplicate_notch_symbols(per_rotor);
+        for (int i = 0; i < state.rotor_count && !clashes.empty(); ++i)
+            if (notch_text(state.rotor_rows[i]).find_first_of(clashes) != std::string::npos)
+                v.notch_ok[i] = false;
     }
 
     v.reflector_ok = !state.reflector_name.empty() &&

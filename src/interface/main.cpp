@@ -1114,7 +1114,30 @@ int self_test() {
                   "apply_suite_lock leaves a non-historic suite alone");
         }
 
-        // G10. Key material must not be tracked by git. A ratchet, not a
+        // G10. The notch rule has one home. kMaxNotchesAnySuite is a
+        //      compile-time constant an interface can size an array with,
+        //      so the suite table is checked against it here rather than
+        //      trusted to stay in step. It did not stay in step once: the
+        //      GUI carried three notch boxes for a cap that had moved to
+        //      five, and silently truncated generated rotors to fit.
+        {
+            int widest = 0;
+            for (const auto& [code, su] : suites())
+                if (su.max_notches > widest) widest = su.max_notches;
+            check(widest == kMaxNotchesAnySuite,
+                  "kMaxNotchesAnySuite (" + std::to_string(kMaxNotchesAnySuite) +
+                      ") equals the widest suite max_notches (" + std::to_string(widest) + ")");
+            check(duplicate_notch_symbols({"abc", "def"}).empty(),
+                  "distinct notches across rotors are accepted");
+            check(duplicate_notch_symbols({"abc", "cde"}) == "c",
+                  "a notch symbol shared by two rotors is reported");
+            check(duplicate_notch_symbols({"aa"}) == "a",
+                  "a notch symbol repeated within one rotor is reported");
+            check(duplicate_notch_symbols({"abc", "cda", "e"}) == "ac",
+                  "every clashing symbol is reported, not just the first");
+        }
+
+        // G11. Key material must not be tracked by git. A ratchet, not a
         //      remedy: nothing is tracked today and this is what keeps it
         //      that way.
         std::vector<std::string> tracked = tracked_key_material();
