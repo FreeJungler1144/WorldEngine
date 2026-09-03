@@ -64,6 +64,27 @@ void label(const Rect& r, const std::string& text, bool dim = false, Font font =
 bool button(const Rect& r, const std::string& text, const GuiInput& in, bool enabled,
             bool accent = false);
 
+// The clickable INOP wordmark, drawn in the Wordmark font with a hover
+// fill. Every screen that carries the wordmark draws it through this one
+// call. Returns true if clicked this frame.
+bool wordmark_button(const Rect& r, const GuiInput& in);
+
+// Read-only text wrapped to fit the width of `r`, drawn in a box like a
+// field. Breaks at spaces where it can and mid-word where it must, which
+// is what a block-grouped ciphertext needs. Content shorter than the box
+// is centred vertically; content taller than it scrolls, and `scroll` is
+// the caller-owned offset in pixels, moved only while the pointer is over
+// the box and clamped here. Returns the number of lines laid out.
+int text_block(const Rect& r, const std::string& text, const GuiInput& in, float& scroll,
+               bool dim = false);
+
+// How many lines `text` wraps to inside a box `box_w` wide, by the same
+// rule text_block lays out with, and the height a box needs to show that
+// many. Together they let a caller size a box to its content before
+// drawing it.
+int text_block_lines(float box_w, const std::string& text);
+float text_block_height(int lines);
+
 // Returns true if value changed this frame.
 bool toggle(const Rect& r, bool& value, const std::string& text, const GuiInput& in, bool enabled);
 

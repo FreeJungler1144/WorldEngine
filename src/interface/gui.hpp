@@ -13,9 +13,10 @@ namespace inop {
 // (window-close, Esc, or the main menu's Exit button). Returns to the
 // terminal menu afterward. Opens on the main menu (gui_main_menu.hpp);
 // "Open INOP" there leads to the machine setup screen
-// (gui_setup_panel.hpp), whose own INOP wordmark leads back. The main
-// menu's Maintenance and Settings buttons, and the setup screen's own
-// "Next" button, are all still no-ops — later pieces of work.
+// (gui_setup_panel.hpp), whose own INOP wordmark leads back and whose
+// "Next" button leads on to the enciphering screen
+// (gui_enciphering_panel.hpp). The Maintenance and Settings buttons on
+// the main menu are still no-ops — later pieces of work.
 void run_gui_settings();
 
 }  // namespace inop

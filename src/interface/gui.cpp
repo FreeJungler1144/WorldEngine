@@ -3,6 +3,7 @@
 #include "gui.hpp"
 
 #include <iostream>
+#include <string>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -29,6 +30,7 @@
 // what makes WGL hand back the driver's default compatibility context.
 #include <GLFW/glfw3.h>
 
+#include "gui_enciphering_panel.hpp"
 #include "gui_main_menu.hpp"
 #include "gui_render.hpp"
 #include "gui_setup_panel.hpp"
@@ -94,12 +96,14 @@ void run_gui_settings() {
 
     gui::SetupPanel panel;
     gui::MainMenu main_menu;
-    // Owned here, not by either screen — a screen only knows how to signal
+    gui::EncipheringPanel enciphering;
+    // Owned here, not by any screen — a screen only knows how to signal
     // "the operator picked me" (open_inop_requested()/wordmark_clicked()/
-    // exit_requested()), not what that means for what gets shown next. See
-    // gui_setup_panel.hpp's header comment for why the screens themselves
-    // stay this narrow. The GUI opens on MainMenu, not Setup directly.
-    enum class Screen { MainMenu, Setup };
+    // next_clicked()/back_clicked()/exit_requested()), not what that means
+    // for what gets shown next. See the header comment of
+    // gui_setup_panel.hpp for why the screens themselves stay this narrow.
+    // The GUI opens on MainMenu, not Setup directly.
+    enum class Screen { MainMenu, Setup, Enciphering };
     Screen screen = Screen::MainMenu;
     bool mouse_down_prev = false;
 
@@ -121,6 +125,23 @@ void run_gui_settings() {
         if (screen == Screen::Setup) {
             panel.frame(g_input, fb_w, fb_h);
             if (panel.wordmark_clicked()) screen = Screen::MainMenu;
+            if (panel.next_clicked()) {
+                enciphering.open(panel.state());
+                screen = Screen::Enciphering;
+            }
+        } else if (screen == Screen::Enciphering) {
+            enciphering.frame(g_input, fb_w, fb_h);
+            // The clipboard is the one thing the screen needs GLFW for,
+            // and GLFW stays in this file, so the screen asks and this
+            // loop answers.
+            std::string copy;
+            if (enciphering.take_copy_request(&copy)) glfwSetClipboardString(window, copy.c_str());
+            if (enciphering.paste_requested()) {
+                const char* pasted = glfwGetClipboardString(window);
+                enciphering.deliver_paste(pasted ? pasted : "");
+            }
+            if (enciphering.back_clicked()) screen = Screen::Setup;
+            if (enciphering.wordmark_clicked()) screen = Screen::MainMenu;
         } else {
             main_menu.frame(g_input, fb_w, fb_h);
             if (main_menu.open_inop_requested()) screen = Screen::Setup;

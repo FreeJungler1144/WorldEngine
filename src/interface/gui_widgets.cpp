@@ -84,6 +84,111 @@ bool button(const Rect& r, const std::string& text, const GuiInput& in, bool ena
     return clicked;
 }
 
+bool wordmark_button(const Rect& r, const GuiInput& in) {
+    bool hovered = rect_contains(r, in.mouse_x, in.mouse_y);
+    if (hovered) draw_rect(r.x, r.y, r.w, r.h, palette::panel());
+    draw_text(Font::Wordmark, r.x + 8, r.y + text_line_height(Font::Wordmark) * 0.75f, "INOP",
+              palette::text());
+    return hovered && in.mouse_pressed;
+}
+
+namespace {
+
+// Widths add up exactly here: the baked atlas has no kerning, so one
+// measurement per character is enough to know where a line ends.
+std::vector<std::string> wrap_lines(float box_w, const std::string& text) {
+    const float avail = std::max(0.0f, box_w - 2 * PAD);
+    std::vector<std::string> lines;
+    std::string cur;
+    float cur_w = 0;
+    size_t last_space = std::string::npos;
+    for (char c : text) {
+        if (c == '\n') {
+            lines.push_back(cur);
+            cur.clear();
+            cur_w = 0;
+            last_space = std::string::npos;
+            continue;
+        }
+        float cw = text_width(Font::Body, std::string(1, c));
+        if (cur_w + cw > avail && !cur.empty()) {
+            if (c == ' ') {
+                lines.push_back(cur);
+                cur.clear();
+                cur_w = 0;
+                last_space = std::string::npos;
+                continue;
+            }
+            if (last_space != std::string::npos) {
+                lines.push_back(cur.substr(0, last_space));
+                cur = cur.substr(last_space + 1);
+                cur_w = text_width(Font::Body, cur);
+                last_space = std::string::npos;
+            } else {
+                lines.push_back(cur);
+                cur.clear();
+                cur_w = 0;
+            }
+        }
+        if (c == ' ') last_space = cur.size();
+        cur.push_back(c);
+        cur_w += cw;
+    }
+    if (!cur.empty() || lines.empty()) lines.push_back(cur);
+    return lines;
+}
+
+float block_line_height() { return text_line_height(Font::Body) * 1.3f; }
+
+}  // namespace
+
+int text_block_lines(float box_w, const std::string& text) {
+    return static_cast<int>(wrap_lines(box_w, text).size());
+}
+
+float text_block_height(int lines) {
+    if (lines < 1) lines = 1;
+    return static_cast<float>(lines) * block_line_height() + 2 * PAD;
+}
+
+int text_block(const Rect& r, const std::string& text, const GuiInput& in, float& scroll,
+               bool dim) {
+    draw_rect(r.x, r.y, r.w, r.h, palette::panel());
+    draw_rect_outline(r.x, r.y, r.w, r.h, palette::border());
+
+    std::vector<std::string> lines = wrap_lines(r.w, text);
+    const float lh = block_line_height();
+    const float content_h = static_cast<float>(lines.size()) * lh;
+
+    // Compared against the whole box, not the box minus padding: a single
+    // line in a field-height box is taller than the padded interior, and
+    // treating that as overflow is what used to push it down far enough
+    // for its descenders to touch the bottom edge.
+    const float overflow = content_h - r.h;
+    float top;
+    if (overflow <= 0) {
+        scroll = 0;
+        top = r.y + (r.h - content_h) * 0.5f;
+    } else {
+        if (in.scroll_y != 0 && rect_contains(r, in.mouse_x, in.mouse_y))
+            scroll -= static_cast<float>(in.scroll_y) * lh;
+        if (scroll < 0) scroll = 0;
+        if (scroll > overflow + 2 * PAD) scroll = overflow + 2 * PAD;
+        top = r.y + PAD - scroll;
+    }
+
+    begin_scissor(r.x, r.y, r.w, r.h);
+    float y = top;
+    for (const std::string& line : lines) {
+        if (y + lh > r.y && y < r.y + r.h)
+            draw_text(Font::Body, r.x + PAD, y + lh * 0.75f, line,
+                      dim ? palette::text_dim() : palette::text());
+        y += lh;
+    }
+    end_scissor();
+    return static_cast<int>(lines.size());
+}
+
 bool toggle(const Rect& r, bool& value, const std::string& text, const GuiInput& in,
             bool enabled) {
     bool changed = false;
@@ -143,6 +248,21 @@ bool text_field(const Rect& r, std::string& value, const GuiInput& in, const std
         }
     } else {
         std::string shown = value + (focused ? "|" : "");
+        if (!center_text) {
+            // Show the tail once the text outgrows the box, so what was
+            // just typed stays in view. Widths add up exactly: the baked
+            // atlas has no kerning.
+            float avail = r.w - 2 * PAD;
+            float used = 0;
+            size_t start = shown.size();
+            while (start > 0) {
+                float cw = text_width(Font::Body, std::string(1, shown[start - 1]));
+                if (used + cw > avail) break;
+                used += cw;
+                --start;
+            }
+            if (start > 0) shown = shown.substr(start);
+        }
         if (center_text) {
             float tw = text_width(Font::Body, shown);
             label(Rect{r.x + (r.w - tw) * 0.5f, r.y, r.w, r.h}, shown, !enabled);

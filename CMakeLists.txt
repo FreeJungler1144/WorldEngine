@@ -82,6 +82,7 @@ if(INOP_WITH_GUI)
     src/interface/gui_file_tile_panel.cpp
     src/interface/gui_setup_panel.cpp
     src/interface/gui_main_menu.cpp
+    src/interface/gui_enciphering_panel.cpp
   )
 else()
   set(INOP_GUI_SOURCES src/interface/gui_stub.cpp)

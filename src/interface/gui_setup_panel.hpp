@@ -1,10 +1,11 @@
 // gui_setup_panel.hpp — the setup screen: state, live
 // validation, layout, and the Save/Load Setup flows.
 //
-// This is the only GUI file that talks to registry.hpp/pipeline.hpp/
-// settings.hpp/languages.hpp/rng.hpp/generator.hpp — gui_render.hpp/
-// gui_widgets.hpp know nothing about the cipher domain, and this file knows
-// nothing about GLFW callbacks (gui.cpp owns those).
+// This file and gui_enciphering_panel.hpp are the only GUI files that
+// talk to registry.hpp/pipeline.hpp/settings.hpp/languages.hpp/rng.hpp/
+// generator.hpp — gui_render.hpp/gui_widgets.hpp know nothing about the
+// cipher domain, and neither panel knows anything about GLFW callbacks
+// (gui.cpp owns those).
 #pragma once
 
 #include <string>
@@ -12,6 +13,7 @@
 
 #include "gui_widgets.hpp"
 #include "registry.hpp"
+#include "settings.hpp"
 
 namespace inop {
 namespace gui {
@@ -108,6 +110,12 @@ void apply_toggle_lock(PanelState& state);
 // gui_config_store's load-time corruption check).
 bool master_key_valid(const PanelState& state, const FieldValidity& validity);
 
+// The field copies PanelState was shaped for: one Settings the CLI path
+// (validate_settings, build_machine) accepts as if it had been typed or
+// loaded there. Only meaningful for a state that passes derive_validity()
+// and master_key_valid(), which is what enables Next.
+Settings settings_from_panel(const PanelState& state);
+
 // Transient, non-persisted UI state: which overlay/modal is open, and any
 // in-progress modal input. Kept apart from PanelState (the serializable
 // data), the same separation the codebase already draws between Settings
@@ -141,6 +149,11 @@ public:
     // whatever screen it leads to. Does not reset itself; the caller reads
     // it once per frame right after frame() returns.
     bool wordmark_clicked() const { return wordmark_clicked_; }
+
+    // True the frame Next was clicked. Next is only enabled once the
+    // configuration is complete, so state() is usable whenever this is.
+    bool next_clicked() const { return next_clicked_; }
+    const PanelState& state() const { return state_; }
 
 private:
     void draw_header(const GuiInput& in, float width);
@@ -191,6 +204,7 @@ private:
     PanelUiState ui_;
     FieldValidity validity_;
     bool wordmark_clicked_ = false;
+    bool next_clicked_ = false;
 };
 
 }  // namespace gui

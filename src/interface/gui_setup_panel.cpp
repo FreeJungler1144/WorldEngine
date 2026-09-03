@@ -24,16 +24,6 @@ int index_of(const std::vector<std::string>& v, const std::string& s) {
     return -1;
 }
 
-// A lighter-weight clickable text button than the generic filled button()
-// widget, drawn in the Wordmark font — used only for the "INOP" wordmark.
-bool wordmark_button(const Rect& r, const GuiInput& in) {
-    bool hovered = rect_contains(r, in.mouse_x, in.mouse_y);
-    if (hovered) draw_rect(r.x, r.y, r.w, r.h, palette::panel());
-    draw_text(Font::Wordmark, r.x + 8, r.y + text_line_height(Font::Wordmark) * 0.75f, "INOP",
-              palette::text());
-    return hovered && in.mouse_pressed;
-}
-
 // Dropdowns default to stretching across whatever column they're laid out
 // in, but their actual values (rotor/reflector names, suite/language
 // labels) are all short — sizing the box to the longest current option
@@ -45,20 +35,6 @@ float dropdown_content_width(const std::vector<std::string>& options, float min_
         if (tw > w) w = tw;
     }
     return w > max_w ? max_w : w;
-}
-
-void log_next_clicked(const PanelState& state) {
-    std::cout << "[gui] Next clicked (no-op) -- suite=" << state.suite_code << " rotors=[";
-    for (int i = 0; i < state.rotor_count; ++i)
-        std::cout << (i ? "," : "") << state.rotor_rows[i].rotor_name;
-    std::cout << "] reflector=" << state.reflector_name
-              << " plugs=" << [&] {
-                     int n = 0;
-                     for (int i = 0; i < kMaxPlugSlots; ++i)
-                         if (plug_pair(state, i).size() == 2) ++n;
-                     return n;
-                 }()
-              << " master_key_len=" << state.master_key_text.size() << "\n";
 }
 
 }  // namespace
@@ -243,6 +219,24 @@ bool master_key_valid(const PanelState& state, const FieldValidity& validity) {
     return true;
 }
 
+Settings settings_from_panel(const PanelState& state) {
+    Settings s;
+    s.suite_code = state.suite_code;
+    for (int i = 0; i < state.rotor_count; ++i) {
+        const RotorRow& row = state.rotor_rows[i];
+        s.rotors.push_back(row.rotor_name);
+        s.rings.push_back(row.ring_text.empty() ? 1 : std::stoi(row.ring_text));
+        s.notches.push_back(notch_text(row));
+    }
+    s.reflector = state.reflector_name;
+    for (int i = 0; i < kMaxPlugSlots; ++i) {
+        std::string pair = plug_pair(state, i);
+        if (pair.size() == 2) s.plugs.push_back(pair);
+    }
+    s.master_key = state.master_key_text;
+    return s;
+}
+
 // ── panel ───────────────────────────────────────────────────────────────
 
 SetupPanel::SetupPanel() {
@@ -303,6 +297,7 @@ void SetupPanel::sync_state_from_indices() {
 void SetupPanel::frame(const GuiInput& real_in, int width, int height) {
     begin_widget_frame();
     wordmark_clicked_ = false;
+    next_clicked_ = false;
 
     sync_indices_from_state();
     validity_ = derive_validity(state_);
@@ -378,7 +373,7 @@ void SetupPanel::draw_header(const GuiInput& in, float width) {
     bool next_enabled = validity_.all_mandatory_ok && master_key_valid(state_, validity_);
     float btn_w = 150, btn_h = 30, gap = 6;
     Rect next_r{width - btn_w - 16, pad, btn_w, btn_h};
-    if (button(next_r, "Next", in, next_enabled, next_enabled)) log_next_clicked(state_);
+    if (button(next_r, "Next", in, next_enabled, next_enabled)) next_clicked_ = true;
 
     Rect generate_r{width - btn_w - 16, pad + (btn_h + gap), btn_w, btn_h};
     if (button(generate_r, "Generate Setup", in, true)) on_generate_clicked();

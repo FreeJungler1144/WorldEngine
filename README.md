@@ -1,19 +1,17 @@
-# INOP — rotor cipher machine
+# INOP, a rotor cipher machine
 
 Rejoice, for AES256 has a challenger at its reach! (It doesnt. Keep reading.)
 
 INOP is a rotor cipher machine in the Enigma line, written in C++. It is a
-thought experiment, not a security product — what a machine like this would
-have looked like if it had been built in the 1940s, with the constraints of
-that era honored rather than engineered around. It is not a modern cipher
-and does not try to be.
+thought experiment and not a security product. It asks what a machine like
+this would have looked like if it had been built in the 1940s, and it keeps
+the constraints of that era. It is not a modern cipher and doesnt try to be.
 
-Several things here that look like defects are chosen on purpose. The
-rules that matter are enforced rather than written down: the build refuses
-a cipher core carrying a modern primitive, and `--self-test` fails by name
-when one of the guards is removed. Where a design decision has since been
-measured, the numbers are in [measurements/](measurements/) rather than in
-an argument.
+Several things here that look like defects are chosen on purpose. The rules
+that matter are enforced by the build. It refuses a cipher core carrying a
+modern primitive, and `--self-test` fails by name when one of the guards is
+removed. Where a design decision has been measured, the numbers are in
+[measurements/](measurements/).
 
 ## What this is
 
@@ -24,56 +22,54 @@ Two suites ship:
 | Legacy   | 26       | 3      | I-VII, historic notches      | A B C      | 5      |
 | INOP-38  | 38       | 5-10   | R1-R10, notches per message  | D E F G H  | 16     |
 
-**Legacy** is a faithful, locked 1939 machine — no padding, no double pass,
+**Legacy** is a faithful, locked 1939 machine: no padding, no double pass,
 no reflector motion, 5-letter output groups, exactly the historic machine
 and nothing else. It exists as a correctness reference, checked at startup
 against a known historic vector.
 
 **INOP-38** is the actual machine. Its 38-symbol alphabet (`a-z`, `0-9`,
-`#` for space, `/` for a literal slash) is why it exists at all — a Legacy
-machine silently drops digits and spaces from a message, which is exactly
-the failure INOP-38 was built to avoid. The operator picks a rotor count
-from 5 to 10 once per session, before anything else is asked for.
+`#` for space, `/` for a literal slash) is why it exists at all. A Legacy
+machine silently drops digits and spaces from a message, and that is the
+failure INOP-38 was built to avoid. The operator picks a rotor count from 5
+to 10 once per session, before anything else is asked for.
 
 `src/logic/inop.hpp` and `src/logic/inop.cpp` may only ever contain a rotor
 machine: wired permutations, a fixed-point-free reflector, a plugboard,
-ring settings, notches — no hash functions, no block ciphers, no modern
-primitives. Everything else (padding, cover traffic, the double pass, wheel
-generation, the language layer, the terminal interface) is operator
-procedure, deliberately unconstrained, and lives in `pipeline.*`,
+ring settings, notches, with no hash functions, no block ciphers and no
+modern primitives. Everything else (padding, cover traffic, the double
+pass, wheel generation, the language layer, the terminal interface) is
+operator procedure, deliberately unconstrained, and lives in `pipeline.*`,
 `generator.*`, `languages.*`, `settings.*`, `batch.*` and `main.cpp`, free
-to change without ever touching the core. That split is the point: the
-core is frozen so it never needs rewriting, and the prep layer is where
-this project evolves. It is checked at build time by
-`cmake/check_source_rules.cmake`, which fails the build and quotes the
-offending line.
+to change without ever touching the core. The core is frozen so it never
+needs rewriting, and the prep layer is where this project evolves.
+`cmake/check_source_rules.cmake` checks the split at build time, and fails
+the build quoting the offending line.
 
 ## Why it is useful
 
-Not as a way to actually keep a secret. INOP makes no claim of security
+It is not useful as a way to keep a secret. INOP makes no claim of security
 against a modern attacker, has no diffusion, and has received no
-professional cryptanalytic review. Do not use it for anything real.
+professional cryptanalytic review. Dont use it for anything real.
 
-What it is useful for: a working, buildable answer to "what would a better
-rotor machine have looked like." Every design choice traces back to a real
-historic weakness — the double pass exists specifically to remove Enigmas
-fatal no-self-encipherment property that let Bletchley Park crib-drag;
-daily wheel regeneration removes the fixed-wiring assumption every
-Bletchley technique depended on; the notch count is picked to keep as many
-rotors as possible actually turning inside a single message, rather than to
-stretch a period that was already longer than any message would ever reach.
-If you are curious how rotor cryptanalysis
-actually worked, or what a determined but period-honest redesign of Enigma
-would look like, that is what this project demonstrates.
+It is useful as a working, buildable answer to what a better rotor machine
+would have looked like. Every design choice traces back to a real historic
+weakness. The double pass removes Enigmas fatal no-self-encipherment
+property, the one that let Bletchley Park crib-drag. Daily wheel
+regeneration removes the fixed-wiring assumption every Bletchley technique
+depended on. The notch count is picked to keep as many rotors as possible
+turning inside a single message, not to stretch a period that was already
+longer than any message would ever reach. If you are curious how rotor
+cryptanalysis actually worked, or what a determined but period-honest
+redesign of Enigma would look like, that is what this project demonstrates.
 
-All three of those claims have now been run against an actual attack
-rather than argued. `inop_bombe` recovers a Legacy setting in about two
-seconds, and against INOP-38 with the wheels regenerated it recovers
-nothing at all, because the answer is not in the search space. The double
-pass costs that attacker roughly 7x and does not stop it. The notch count
-turns out to make no measured difference to search cost whatsoever. See
-[measurements/3-bombe.md](measurements/3-bombe.md), which states plainly
-where the numbers disagree with the reasoning.
+All three of those claims have now been run against an actual attack.
+`inop_bombe` recovers a Legacy setting in about two seconds, and against
+INOP-38 with the wheels regenerated it recovers nothing at all, because the
+answer is not in the search space. The double pass costs that attacker
+roughly 7x and doesnt stop it. The notch count turns out to make no
+measured difference to search cost. See
+[measurements/3-bombe.md](measurements/3-bombe.md), which says where the
+numbers disagree with the reasoning.
 
 ## How to get started
 
@@ -86,11 +82,10 @@ ctest --test-dir build      # correctness, entropy and throughput checks
 ```
 
 The build runs `cmake/check_source_rules.cmake` before it compiles
-anything. That check is the reason the design rules are rules: it fails the
-build, names the rule and quotes the line if the cipher core picks up a
-modern primitive, or if anything outside the benchmark harness reaches for
-`rand()` or `std::random_device`. It cannot be skipped by not running the
-tests.
+anything. It fails the build, names the rule and quotes the line if the
+cipher core picks up a modern primitive, or if anything outside the
+benchmark harness reaches for `rand()` or `std::random_device`. It runs on
+every build, so skipping the tests doesnt skip it.
 
 Three offline targets build alongside `inop`. None of them is ever linked
 into the live message pipeline, and none reads or writes key material:
@@ -104,10 +99,10 @@ into the live message pipeline, and none reads or writes key material:
 
 `-DINOP_WERROR=ON` turns warnings into errors, which is how CI builds it.
 
-Or by hand. `src/` is split by role (`logic/`, `settings/`, `interface/`,
-`benchmark-debug/` — see `CMakeLists.txt`s header comment), so this needs
-`-I` for each and an explicit file list rather than a single `src/*.cpp`
-glob:
+Building by hand works too. `src/` is split by role (`logic/`, `settings/`,
+`interface/`, `benchmark-debug/`, see the header comment in
+`CMakeLists.txt`), so this needs `-I` for each and an explicit file list
+instead of a single `src/*.cpp` glob:
 
 ```sh
 g++ -std=c++23 -O2 -Isrc/logic -Isrc/settings -Isrc/interface -o inop \
@@ -128,16 +123,16 @@ uses `/dev/urandom`. Nothing else is linked in a CLI-only build.
 
 ### Optional GUI
 
-`cmake -B build -DINOP_WITH_GUI=ON` (see `CMakePresets.json`s `gui` preset
-for a ready-made vcpkg + MinGW + `x64-mingw-static` invocation) additionally
-builds a settings-panel window — GLFW for the window/context, raw OpenGL
-for drawing, `stb_truetype` for text, `nlohmann-json` for the Save/Load
-Settings file format. It is reached from a menu option in the same
-terminal session, not a separate executable, and a CLI-only build (the
-default) never links any of it. This is a deliberate, bounded exception to
-the zero-dependency rule above, not a reversal of it. It does not touch
-the cipher core, does not change what a CLI-only build depends on, and
-does not open the door to a general GUI framework — the header comment in
+`cmake -B build -DINOP_WITH_GUI=ON` (see the `gui` preset in
+`CMakePresets.json` for a ready-made vcpkg + MinGW + `x64-mingw-static`
+invocation) additionally builds a windowed interface: GLFW for the window
+and context, raw OpenGL for drawing, `stb_truetype` for text,
+`nlohmann-json` for the Save/Load Setup file format. It is reached from a
+menu option in the same terminal session, not a separate executable, and a
+CLI-only build (the default) never links any of it. This is a deliberate,
+bounded exception to the zero-dependency rule above. It doesnt touch the
+cipher core, doesnt change what a CLI-only build depends on, and doesnt
+open the door to a general GUI framework. The header comment in
 `src/interface/gui.hpp` draws the boundary.
 
 ### First session
@@ -150,8 +145,8 @@ does not open the door to a general GUI framework — the header comment in
 ```
 
 The first time through, pick option 2 and generate a rotor/reflector batch
-and a key sheet before sending anything you care about — the program ships
-with a small built-in demo/regression wheel set, not real key material.
+and a key sheet before sending anything you care about. The program ships
+with a small built-in demo and regression wheel set, not real key material.
 
 Once a machine is configured, the session commands are:
 
@@ -164,16 +159,17 @@ Once a machine is configured, the session commands are:
 | `:s` | write the current settings to `inop.settings` |
 | `:q` | quit |
 
-Case does not matter for commands, and `:quit` / `:help` / `:info` also
-work. Anything starting with `:` that is not a recognized command is
-refused rather than enciphered, so a mistyped command never quietly becomes
-a message.
+Case doesnt matter for commands, and `:quit` / `:help` / `:info` also work.
+Anything starting with `:` that isnt a recognized command is refused
+instead of enciphered, so a mistyped command never quietly becomes a
+message.
 
 `:d` refuses a ciphertext containing anything outside the alphabet, naming
-the character and its position, rather than quietly discarding it. A hyphen
-picked up from a wrapped line is the common case, and under Legacy so is any
-digit. Dropping one would shift every position after it and hand back noise,
-so retyping the line is the only useful answer and the message says so.
+the character and its position instead of quietly discarding it. A hyphen
+picked up from a wrapped line is the common case, and under Legacy so is
+any digit. Dropping one would shift every position after it and hand back
+noise, so retyping the line is the only useful answer and the message says
+so.
 
 ### Whats inside, briefly
 
@@ -181,31 +177,31 @@ A few features exist that are worth knowing about before you start:
 
 - **The numeral-suffix diacritic scheme.** INOP-38s alphabet has no accented
   letters, so an accented character folds to its base letter plus a digit
-  naming which mark it carried (é becomes `e2`, for instance) instead of
-  being dropped. It supports 48 languages by name, is fully reversible, and
-  needs no special handling for Pinyin input since it already speaks this
+  naming which mark it carried. é becomes `e2`, for instance, and nothing
+  gets dropped. It supports 48 languages by name, is fully reversible, and
+  needs no special handling for Pinyin input, which already speaks this
   scheme natively. `fold_diacritics()` and `resubstitute()` in
   `src/logic/languages.cpp` are the entry points, and the full digit table
-  and language list are in that same file. How much the scheme actually
-  costs, measured against real corpus text in 48 languages, is in
+  and language list are in that same file. How much the scheme costs,
+  measured against real corpus text in 48 languages, is in
   [measurements/](measurements/).
-- **Morse, hex, binary** are not a separate input mode — INOP-38s alphabet
+- **Morse, hex, binary** are not a separate input mode. INOP-38s alphabet
   already contains `0-9`, the hex letters `a-f`, and letters generally, so
   a hex string or a binary string is already valid plaintext. Try
   `deadbeef` or `101100111` at the message prompt.
 - **Human-readable decrypt.** Raw INOP-38 ciphertext decrypts back to raw
-  INOP-38 plaintext, numeral suffixes and all — `resubstitute()` turns that
+  INOP-38 plaintext, numeral suffixes and all. `resubstitute()` turns that
   back into normal text automatically, driven by a 3-letter language tag
   appended unencrypted to the end of the transmitted ciphertext.
-  Capitalization is not restored; output stays lowercase.
+  Capitalization is not restored, and output stays lowercase.
 - **Batch processing** (`:b`) reads a set of pasted or file-based messages
   and enciphers each one under a rotor configuration pulled from
   `inop_keysheet.txt`, either one indexed entry for every message or
   sequentially through the file. Input files are capped at 1.44MB.
 - **Maintenance** (menu option 2) generates rotor batches, reflector
   batches, and key sheets, all checked against a live entropy self-test and
-  rejected if they turn out degenerate — a silently broken generator is the
-  worst failure this program can have, since it does not crash and its
+  rejected if they turn out degenerate. A silently broken generator is the
+  worst failure this program can have, because it doesnt crash and its
   output still looks plausible.
 
 `inop_wheels.txt`, `inop_keysheet.txt` and `inop.settings` are real or
@@ -214,57 +210,54 @@ potential key material and are in `.gitignore`. Never commit them.
 **Upgrading from an older build:** the alphabet case flip (INOP-38 is
 lowercase, Legacy stays uppercase) means anything generated under the old
 uppercase convention will fail validation and get rejected with a clear
-error rather than silently misbehaving. Regenerate it from the maintenance
+error instead of silently misbehaving. Regenerate it from the maintenance
 menu.
 
-Separately, **stored ciphertext does not carry across this version.** The
+Separately, **stored ciphertext doesnt carry across this version.** The
 transposition between the two passes of the double pass changed from a
 reversal to a half-swap, and the reflector now turns on its own counter, so
 the same setup sheet produces different ciphertext than it used to. Key
-sheets, wheel files, settings files and the wire format are all unaffected —
-only already-enciphered traffic is. Decipher anything you still need with the
-old build before upgrading.
+sheets, wheel files, settings files and the wire format are all unaffected.
+Only already-enciphered traffic is. Decipher anything you still need with
+the old build before upgrading.
 
-Both changes were made for the same kind of reason. Reversal fixes the
-middle index of an odd-length message, which hands back the exact property
-the double pass exists to destroy at a position anyone can compute from
-the length; the half-swap has no fixed index at all. The reflector used to
-advance once per character, which is what the fast rotor does, so its
-position was a relabelling of that rotor and contributed no state; it now
-runs one tooth short of the alphabet.
+Reversal fixes the middle index of an odd-length message, which hands back
+the exact property the double pass exists to destroy, at a position anyone
+can compute from the length. The half-swap has no fixed index at all. The
+reflector used to advance once per character, which is what the fast rotor
+does, so its position was a relabelling of that rotor and contributed no
+state. It now runs one tooth short of the alphabet.
 
-One visible behaviour change comes with it: with **padding switched off**, a
+One visible behaviour change comes with it. With **padding switched off**, a
 message whose body length is odd gets one extra symbol drawn from the
-alphabet before enciphering, because the half-swap needs an even length. That
-symbol comes back on the round trip as a single trailing character. With
-padding on — the default — it never happens, since padding already rounds the
-body to a whole number of blocks.
+alphabet before enciphering, because the half-swap needs an even length.
+That symbol comes back on the round trip as a single trailing character.
+With padding on, the default, it never happens, since padding already
+rounds the body to a whole number of blocks.
 
 ## Where to get help
 
-Start with `./build/inop --help` and `./build/inop --self-test` — the
-second one runs every correctness, entropy, and throughput check the
-project has, and is the fastest way to confirm a build or a change did not
-break anything.
+Start with `./build/inop --help` and `./build/inop --self-test`. The second
+runs every correctness, entropy, and throughput check the project has, and
+is the fastest way to confirm a build or a change didnt break anything.
 
-For anything the self-test does not answer, [measurements/](measurements/)
-is the next place to look: one markdown table per experiment, each stating
-what it settles and in which direction, including the ones that came out
-against the design. If your question is not answered there either, open an
-issue on this repository.
+For anything the self-test doesnt answer, [measurements/](measurements/) is
+the next place to look. It holds one markdown table per experiment, each
+saying what it settles and in which direction, including the ones that came
+out against the design. If your question isnt answered there either, open
+an issue on this repository.
 
 ## Who maintains this
 
 This repository is maintained through normal GitHub pull requests and
-issues — there is no separate contribution process. Before proposing a
-change to `src/logic/inop.hpp` or `src/logic/inop.cpp` specifically, note
-that the pair may only ever contain a rotor machine, and a change that
-would turn it into anything else (a hash-based construction, a modern
-block cipher, a dependency on a crypto library) will not be accepted
-regardless of how it is justified. That rule is not a request: the build
-scans those two files for an include allowlist and for the symbols a
-modern primitive would arrive under, and refuses to compile if one turns
-up.
+issues, with no separate contribution process. Before proposing a change to
+`src/logic/inop.hpp` or `src/logic/inop.cpp` specifically, note that the
+pair may only ever contain a rotor machine, and a change that would turn it
+into anything else (a hash-based construction, a modern block cipher, a
+dependency on a crypto library) will not be accepted regardless of how it
+is justified. The build enforces that: it scans those two files for an
+include allowlist and for the symbols a modern primitive would arrive
+under, and refuses to compile if one turns up.
 
 ## Repository layout
 
@@ -287,6 +280,7 @@ src/interface/         every user-facing entry point
   gui_widgets.*            small immediate-mode widget set (GUI builds only)
   gui_setup_panel.*        the machine setup screen (GUI builds only)
   gui_main_menu.*          the main menu screen (GUI builds only)
+  gui_enciphering_panel.*  the enciphering screen (GUI builds only)
   gui_config_store.*       Save/Load Setup JSON (GUI builds only)
   gui_file_tile_panel.*    reusable file-tile browser overlay (GUI builds only)
 
@@ -303,6 +297,6 @@ cmake/                 the source rules the build enforces
 benchmark/             corpus text, the benchmark log, and the analysis
                        script for the diacritic measurements
 
-measurements/          one markdown table per experiment, each stating what
-                       it settles and in which direction
+measurements/          one markdown table per experiment, and what each
+                       one settles
 ```
