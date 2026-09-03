@@ -8,9 +8,12 @@ have looked like if it had been built in the 1940s, with the constraints of
 that era honored rather than engineered around. It is not a modern cipher
 and does not try to be.
 
-Read [DESIGN.md](DESIGN.md) before reviewing or changing anything here.
-Several things that look like defects are chosen on purpose, and DESIGN.md
-is where the reasoning, the hard constraints, and the open items live.
+Several things here that look like defects are chosen on purpose. The
+rules that matter are enforced rather than written down: the build refuses
+a cipher core carrying a modern primitive, and `--self-test` fails by name
+when one of the guards is removed. Where a design decision has since been
+measured, the numbers are in [measurements/](measurements/) rather than in
+an argument.
 
 ## What this is
 
@@ -39,15 +42,17 @@ primitives. Everything else (padding, cover traffic, the double pass, wheel
 generation, the language layer, the terminal interface) is operator
 procedure, deliberately unconstrained, and lives in `pipeline.*`,
 `generator.*`, `languages.*`, `settings.*`, `batch.*` and `main.cpp`, free
-to change without ever touching the core. See DESIGN.md section 1 for why
-that split exists.
+to change without ever touching the core. That split is the point: the
+core is frozen so it never needs rewriting, and the prep layer is where
+this project evolves. It is checked at build time by
+`cmake/check_source_rules.cmake`, which fails the build and quotes the
+offending line.
 
 ## Why it is useful
 
-Not as a way to actually keep a secret — DESIGN.md says plainly that INOP
-makes no claim of security against a modern attacker, has no diffusion, and
-has received no professional cryptanalytic review. Do not use it for
-anything real.
+Not as a way to actually keep a secret. INOP makes no claim of security
+against a modern attacker, has no diffusion, and has received no
+professional cryptanalytic review. Do not use it for anything real.
 
 What it is useful for: a working, buildable answer to "what would a better
 rotor machine have looked like." Every design choice traces back to a real
@@ -59,8 +64,16 @@ rotors as possible actually turning inside a single message, rather than to
 stretch a period that was already longer than any message would ever reach.
 If you are curious how rotor cryptanalysis
 actually worked, or what a determined but period-honest redesign of Enigma
-would look like, that is what this project demonstrates. See DESIGN.md
-sections 2 and 5 for the full reasoning behind each of these.
+would look like, that is what this project demonstrates.
+
+All three of those claims have now been run against an actual attack
+rather than argued. `inop_bombe` recovers a Legacy setting in about two
+seconds, and against INOP-38 with the wheels regenerated it recovers
+nothing at all, because the answer is not in the search space. The double
+pass costs that attacker roughly 7x and does not stop it. The notch count
+turns out to make no measured difference to search cost whatsoever. See
+[measurements/3-bombe.md](measurements/3-bombe.md), which states plainly
+where the numbers disagree with the reasoning.
 
 ## How to get started
 
@@ -71,6 +84,25 @@ cmake -B build && cmake --build build
 ctest --test-dir build      # correctness, entropy and throughput checks
 ./build/inop                # interactive session
 ```
+
+The build runs `cmake/check_source_rules.cmake` before it compiles
+anything. That check is the reason the design rules are rules: it fails the
+build, names the rule and quotes the line if the cipher core picks up a
+modern primitive, or if anything outside the benchmark harness reaches for
+`rand()` or `std::random_device`. It cannot be skipped by not running the
+tests.
+
+Three offline targets build alongside `inop`. None of them is ever linked
+into the live message pipeline, and none reads or writes key material:
+
+```sh
+./build/inop_benchmark --languages all     # correctness across 48 languages
+./build/inop_langprobe --out probe_out     # dump the folded symbol streams
+./build/inop_bombe --legacy-phase1         # break the Legacy machine
+./build/inop_bombe --inop-ablation         # and measure what INOP costs it
+```
+
+`-DINOP_WERROR=ON` turns warnings into errors, which is how CI builds it.
 
 Or by hand. `src/` is split by role (`logic/`, `settings/`, `interface/`,
 `benchmark-debug/` — see `CMakeLists.txt`s header comment), so this needs
@@ -103,8 +135,10 @@ for drawing, `stb_truetype` for text, `nlohmann-json` for the Save/Load
 Settings file format. It is reached from a menu option in the same
 terminal session, not a separate executable, and a CLI-only build (the
 default) never links any of it. This is a deliberate, bounded exception to
-the zero-dependency rule above, not a reversal of it — see DESIGN.md
-section 10.
+the zero-dependency rule above, not a reversal of it. It does not touch
+the cipher core, does not change what a CLI-only build depends on, and
+does not open the door to a general GUI framework — the header comment in
+`src/interface/gui.hpp` draws the boundary.
 
 ### First session
 
@@ -143,8 +177,7 @@ so retyping the line is the only useful answer and the message says so.
 
 ### Whats inside, briefly
 
-A few features exist that are worth knowing about before you start, each
-covered in full in DESIGN.md rather than here:
+A few features exist that are worth knowing about before you start:
 
 - **The numeral-suffix diacritic scheme.** INOP-38s alphabet has no accented
   letters, so an accented character folds to its base letter plus a digit
@@ -152,8 +185,10 @@ covered in full in DESIGN.md rather than here:
   being dropped. It supports 48 languages by name, is fully reversible, and
   needs no special handling for Pinyin input since it already speaks this
   scheme natively. `fold_diacritics()` and `resubstitute()` in
-  `src/logic/languages.cpp` are the entry points; see DESIGN.md for the
-  full digit table and language list.
+  `src/logic/languages.cpp` are the entry points, and the full digit table
+  and language list are in that same file. How much the scheme actually
+  costs, measured against real corpus text in 48 languages, is in
+  [measurements/](measurements/).
 - **Morse, hex, binary** are not a separate input mode — INOP-38s alphabet
   already contains `0-9`, the hex letters `a-f`, and letters generally, so
   a hex string or a binary string is already valid plaintext. Try
@@ -188,8 +223,15 @@ reversal to a half-swap, and the reflector now turns on its own counter, so
 the same setup sheet produces different ciphertext than it used to. Key
 sheets, wheel files, settings files and the wire format are all unaffected —
 only already-enciphered traffic is. Decipher anything you still need with the
-old build before upgrading. See DESIGN.md sections 5 and 7 for why both
-changes were made.
+old build before upgrading.
+
+Both changes were made for the same kind of reason. Reversal fixes the
+middle index of an odd-length message, which hands back the exact property
+the double pass exists to destroy at a position anyone can compute from
+the length; the half-swap has no fixed index at all. The reflector used to
+advance once per character, which is what the fast rotor does, so its
+position was a relabelling of that rotor and contributed no state; it now
+runs one tooth short of the alphabet.
 
 One visible behaviour change comes with it: with **padding switched off**, a
 message whose body length is odd gets one extra symbol drawn from the
@@ -205,21 +247,24 @@ second one runs every correctness, entropy, and throughput check the
 project has, and is the fastest way to confirm a build or a change did not
 break anything.
 
-For anything the self-test does not answer, DESIGN.md is the deeper
-reference: the threat model, every deliberate decision and why it is not a
-bug, the guards that must never be removed, and the known open items. If
-your question is not answered there either, open an issue on this
-repository.
+For anything the self-test does not answer, [measurements/](measurements/)
+is the next place to look: one markdown table per experiment, each stating
+what it settles and in which direction, including the ones that came out
+against the design. If your question is not answered there either, open an
+issue on this repository.
 
 ## Who maintains this
 
 This repository is maintained through normal GitHub pull requests and
 issues — there is no separate contribution process. Before proposing a
-change to `src/logic/inop.hpp` or `src/logic/inop.cpp` specifically, read
-DESIGN.md section 1: that pair of files may only ever contain a rotor
-machine, and a change that would turn it into anything else (a hash-based
-construction, a modern block cipher, a dependency on a crypto library) will
-not be accepted regardless of how it is justified.
+change to `src/logic/inop.hpp` or `src/logic/inop.cpp` specifically, note
+that the pair may only ever contain a rotor machine, and a change that
+would turn it into anything else (a hash-based construction, a modern
+block cipher, a dependency on a crypto library) will not be accepted
+regardless of how it is justified. That rule is not a request: the build
+scans those two files for an include allowlist and for the symbols a
+modern primitive would arrive under, and refuses to compile if one turns
+up.
 
 ## Repository layout
 
@@ -245,8 +290,19 @@ src/interface/         every user-facing entry point
   gui_config_store.*       Save/Load Setup JSON (GUI builds only)
   gui_file_tile_panel.*    reusable file-tile browser overlay (GUI builds only)
 
-src/benchmark-debug/  combinatorial benchmark harness (offline only,
-                       never wired into the live message pipeline)
+src/benchmark-debug/  combinatorial benchmark harness, and the diacritic
+                       scheme dumper (offline only, never wired into the
+                       live message pipeline)
 
-benchmark/             corpus text and the benchmark log
+src/bombe/            the cryptanalysis harness. An attack tool, filed
+                       apart from the correctness harness because it is a
+                       different kind of thing
+
+cmake/                 the source rules the build enforces
+
+benchmark/             corpus text, the benchmark log, and the analysis
+                       script for the diacritic measurements
+
+measurements/          one markdown table per experiment, each stating what
+                       it settles and in which direction
 ```
