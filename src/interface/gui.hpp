@@ -9,14 +9,26 @@
 
 namespace inop {
 
-// Opens the GUI window and blocks until the operator closes it
-// (window-close, Esc, or the main menu's Exit button). Returns to the
-// terminal menu afterward. Opens on the main menu (gui_main_menu.hpp);
-// "Open INOP" there leads to the machine setup screen
-// (gui_setup_panel.hpp), whose own INOP wordmark leads back and whose
-// "Next" button leads on to the enciphering screen
-// (gui_enciphering_panel.hpp). The Maintenance and Settings buttons on
-// the main menu are still no-ops — later pieces of work.
-void run_gui_settings();
+// Why the GUI closed, which is what decides whether the process ends or
+// carries on into the terminal session. Exit, Esc and the window close
+// button all mean Quit; only the main menu's Terminal button means the
+// operator wants the CLI instead.
+enum class GuiExit { Quit, Terminal };
+
+// Whether this binary has a real GUI at all. True in gui.cpp, false in
+// gui_stub.cpp, so main.cpp can decide whether to open on the window
+// without an #ifdef. A CLI-only build answers false and goes straight to
+// the terminal, silently — an unasked-for "no GUI support" line on every
+// startup would be noise, whereas choosing the menu option and being told
+// is useful.
+bool gui_available();
+
+// Opens the GUI window and blocks until the operator closes it. Opens on
+// the main menu (gui_main_menu.hpp); "Open INOP" there leads to the
+// machine setup screen (gui_setup_panel.hpp), whose own INOP wordmark
+// leads back and whose "Next" button leads on to the enciphering screen
+// (gui_enciphering_panel.hpp). Maintenance (gui_maintenance_panel.hpp) and
+// Settings (gui_settings_panel.hpp) are both real screens now.
+GuiExit run_gui_settings();
 
 }  // namespace inop

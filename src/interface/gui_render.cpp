@@ -86,6 +86,18 @@ bool bake_font(const std::string& path, float pixel_height, FontAtlas& out) {
     return true;
 }
 
+// Every atlas back to its unbaked state, textures released. Shared by
+// shutdown and by a re-bake, since a re-bake that kept the old texture
+// names would leak one atlas per typeface change.
+void free_atlases() {
+    if (g_body.texture) glDeleteTextures(1, &g_body.texture);
+    if (g_wordmark.texture) glDeleteTextures(1, &g_wordmark.texture);
+    if (g_body_large.texture) glDeleteTextures(1, &g_body_large.texture);
+    g_body = FontAtlas{};
+    g_wordmark = FontAtlas{};
+    g_body_large = FontAtlas{};
+}
+
 const FontAtlas& atlas_for(Font font) {
     switch (font) {
         case Font::Wordmark:
@@ -97,7 +109,12 @@ const FontAtlas& atlas_for(Font font) {
     }
 }
 
+// Both in pixels, not logical units: glScissor and glViewport speak
+// pixels, and the width is kept so set_ui_scale() can redo the projection
+// without waiting for the next resize event.
+int g_viewport_w = 0;
 int g_viewport_h = 0;  // needed to flip our top-left-origin rects into glScissor's bottom-left ones
+float g_ui_scale = 1.0f;
 
 }  // namespace
 
@@ -108,35 +125,46 @@ bool render_init() {
     return true;
 }
 
-void render_shutdown() {
-    if (g_body.texture) glDeleteTextures(1, &g_body.texture);
-    if (g_wordmark.texture) glDeleteTextures(1, &g_wordmark.texture);
-    if (g_body_large.texture) glDeleteTextures(1, &g_body_large.texture);
-    g_body = FontAtlas{};
-    g_wordmark = FontAtlas{};
-    g_body_large = FontAtlas{};
-}
+void render_shutdown() { free_atlases(); }
 
 void set_viewport(int width, int height) {
     if (width <= 0 || height <= 0) return;
+    g_viewport_w = width;
     g_viewport_h = height;
     glViewport(0, 0, width, height);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     // Top-left origin, y increasing downward — matches GLFW cursor
     // coordinates so widget hit-testing needs no flip.
-    glOrtho(0, width, height, 0, -1, 1);
+    //
+    // Dividing the extents by the scale is the whole of the zoom: the
+    // window still has the same pixels, but fewer logical units span it,
+    // so everything drawn in logical units comes out proportionally
+    // bigger. No widget, panel or layout constant knows this happened.
+    glOrtho(0, static_cast<double>(width) / g_ui_scale,
+            static_cast<double>(height) / g_ui_scale, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 }
+
+void set_ui_scale(float scale) {
+    if (scale <= 0.0f) return;
+    g_ui_scale = scale;
+    set_viewport(g_viewport_w, g_viewport_h);
+}
+
+float ui_scale() { return g_ui_scale; }
 
 void begin_scissor(float x, float y, float w, float h) {
     glEnable(GL_SCISSOR_TEST);
     // glScissor is bottom-left-origin regardless of the glOrtho we set up,
     // so flip y here rather than asking every caller to think in GL's
-    // coordinate space.
-    glScissor(static_cast<int>(x), static_cast<int>(static_cast<float>(g_viewport_h) - (y + h)),
-              static_cast<int>(w), static_cast<int>(h));
+    // coordinate space. It also speaks pixels while callers speak logical
+    // units, so the scale has to be undone on the way in.
+    const float s = g_ui_scale;
+    const float px = x * s, py = y * s, pw = w * s, ph = h * s;
+    glScissor(static_cast<int>(px), static_cast<int>(static_cast<float>(g_viewport_h) - (py + ph)),
+              static_cast<int>(pw), static_cast<int>(ph));
 }
 
 void end_scissor() { glDisable(GL_SCISSOR_TEST); }
@@ -169,16 +197,22 @@ void draw_rect_outline(float x, float y, float w, float h, Color c, float thickn
     glEnd();
 }
 
-bool load_fonts() {
+bool load_fonts(const std::string& font_file) {
     const char* windir = std::getenv("WINDIR");
     std::string fonts_dir = windir ? std::string(windir) + "\\Fonts\\" : "C:\\Windows\\Fonts\\";
-    // Times New Roman throughout, not just the wordmark — Body/BodyLarge
-    // used to be Segoe UI, but the operator asked for one consistent
-    // typeface across the whole panel.
-    bool ok_body = bake_font(fonts_dir + "times.ttf", 18.0f, g_body);
-    bool ok_word = bake_font(fonts_dir + "times.ttf", 44.0f, g_wordmark);
-    bool ok_large = bake_font(fonts_dir + "times.ttf", 28.0f, g_body_large);
-    return ok_body && ok_word && ok_large;
+    // One typeface throughout, not just the wordmark — Body/BodyLarge used
+    // to be Segoe UI, but the operator asked for one consistent typeface
+    // across the whole panel. Which one it is became a preference; that it
+    // is the same one in all three sizes did not.
+    free_atlases();
+    bool ok_body = bake_font(fonts_dir + font_file, 18.0f, g_body);
+    bool ok_word = bake_font(fonts_dir + font_file, 44.0f, g_wordmark);
+    bool ok_large = bake_font(fonts_dir + font_file, 28.0f, g_body_large);
+    if (!(ok_body && ok_word && ok_large)) {
+        free_atlases();
+        return false;
+    }
+    return true;
 }
 
 float text_width(Font font, const std::string& text) {

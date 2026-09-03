@@ -27,6 +27,14 @@ setup/
 # and vcpkg.json are tracked and belong in the repo.
 setup/*.json
 
+# ── local application preferences ───────────────────────────────────────
+# Written by the GUI settings screen: theme, colourblind mode, window mode
+# and typeface. Not key material and not secret, but it describes one
+# machine and one operator, so it has no business being in the repo. Note
+# the *.json exception above still applies — this file is named
+# explicitly, not covered by a wildcard.
+inop.gui.json
+
 # ── generated benchmark output ──────────────────────────────────────────
 # Timing columns are machine/run-specific — committing them just churns the
 # diff on every re-run for no benefit.

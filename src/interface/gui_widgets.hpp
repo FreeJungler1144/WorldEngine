@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "gui_prefs.hpp"
 #include "gui_render.hpp"
 
 namespace inop {
@@ -34,6 +35,12 @@ struct GuiInput {
     bool key_enter = false;
     bool key_escape = false;
     double scroll_y = 0;
+    // Held, not pressed: the convention across this interface is that
+    // holding Control while doing something that would normally warn you
+    // skips the warning. Polled every frame like the mouse button rather
+    // than arriving as an event, since what matters is whether it is down
+    // at the moment of the click or keypress.
+    bool ctrl_held = false;
 };
 
 // Call once at the very start of a frame, before any widget calls.
@@ -44,7 +51,17 @@ void begin_widget_frame();
 void end_widget_frame(const GuiInput& in);
 
 // Palette shared across the panel so every file draws in the same voice.
+// Every colour drawn anywhere in the GUI comes from here, which is what
+// lets the settings screen restyle the whole application by calling
+// set_palette() and nothing else.
 namespace palette {
+
+// Recomputes every colour below. Called at startup with the stored
+// preferences and again whenever the settings screen applies a change.
+// Defaults, before any call, are the dark palette with no colourblind
+// adjustment.
+void set_palette(Theme theme, ColourblindMode mode);
+
 Color background();
 Color panel();
 Color border();
@@ -52,6 +69,7 @@ Color border_invalid();
 Color text();
 Color text_dim();
 Color accent();       // brass/amber — enabled "Next", focus rings
+Color on_accent();    // ink for text drawn on top of accent()
 Color disabled_bg();
 Color disabled_text();
 Color error_bg();
@@ -128,6 +146,28 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
 // on top of everything else, using the frame's REAL (non-neutered) input.
 // Call this once, last, every frame.
 void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id);
+
+// ── modals ──────────────────────────────────────────────────────────────
+//
+// A modal is drawn over a whole screen, so unlike every other widget here
+// it is not the screen's business: gui.cpp owns which modal is open, draws
+// the screen underneath with neutered input so nothing behind can be
+// clicked, and then calls one of these with the real input. That is why
+// these take a screen size rather than a Rect.
+
+enum class ModalChoice { None, Confirm, Cancel };
+
+// A question with two answers. Enter confirms and Escape cancels, so a
+// modal raised by a keypress can be answered without reaching for the
+// mouse. Returns what was chosen this frame, or None while it waits.
+ModalChoice modal_question(float screen_w, float screen_h, const std::string& title,
+                           const std::string& body, const std::string& confirm_text,
+                           const std::string& cancel_text, const GuiInput& in);
+
+// A statement with nothing to decide. Returns true the frame it is
+// dismissed, by the button, by Enter or by Escape.
+bool modal_notice(float screen_w, float screen_h, const std::string& title,
+                  const std::string& body, const GuiInput& in);
 
 }  // namespace gui
 }  // namespace inop

@@ -302,6 +302,38 @@ bool write_wheel_batch(const std::string& path, const WheelBatch& b, const Suite
     return true;
 }
 
+bool write_key_sheet(const std::string& path, const Suite& s, int count, int plug_pairs,
+                     int notches_per_rotor, bool random_count, int fixed_count,
+                     std::string* first_entry, std::string* error) {
+    std::ofstream f(path);
+    if (!f) {
+        if (error) *error = "cannot write " + path;
+        return false;
+    }
+
+    f << "# INOP key sheet — " << count << " entries for " << s.name << "\n";
+    f << "# copy one block into inop.settings to use it\n";
+
+    std::string first;
+    for (int i = 0; i < count; ++i) {
+        try {
+            int n = random_count
+                        ? s.min_rotors + static_cast<int>(secure_below(
+                              static_cast<uint32_t>(s.max_rotors - s.min_rotors + 1)))
+                        : fixed_count;
+            GeneratedSettings g = random_settings(s, n, plug_pairs, notches_per_rotor);
+            std::string txt = settings_to_text(g);
+            if (i == 0) first = txt;
+            f << "\n# --- entry " << (i + 1) << " ---\n" << txt;
+        } catch (const std::exception& e) {
+            if (error) *error = e.what();
+            return false;
+        }
+    }
+    if (first_entry) *first_entry = first;
+    return true;
+}
+
 namespace {
 
 void gen_wheels(bool rotors) {
@@ -310,8 +342,14 @@ void gen_wheels(bool rotors) {
     const char* what = rotors ? "rotors" : "reflectors";
 
     int count = ask_int(std::string("how many ") + what, rotors ? 50 : 10, 1, 500);
-    // 'G' for generated, so a batch does not silently shadow a factory wheel
-    std::string prefix = ask("name prefix", rotors ? "G" : "GX");
+    // 'U' for a generated rotor, 'K' for a generated reflector, both
+    // numbered from 1. Neither can shadow a factory wheel by reusing its
+    // name: the built-in INOP-38 rotors are R1-R10 and its reflectors are
+    // D-H (A-C on Legacy), so no generated name collides with one. That
+    // matters because make_rotor()/make_reflector() look in the loaded pool
+    // first, so a name clash would silently replace a factory wheel rather
+    // than being reported.
+    std::string prefix = ask("name prefix", rotors ? "U" : "K");
     int start = ask_int("first number", 1, 0, 100000);
 
     int notch_n = 0;
@@ -404,27 +442,10 @@ void gen_settings() {
     }
 
     std::string path = ask("write to", "inop_keysheet.txt");
-    std::ofstream f(path);
-    if (!f) { std::cout << "  ! cannot write " << path << "\n"; return; }
-
-    f << "# INOP key sheet — " << count << " entries for " << s.name << "\n";
-    f << "# copy one block into inop.settings to use it\n";
-
-    std::string first;
-    for (int i = 0; i < count; ++i) {
-        try {
-            int n = random_count
-                        ? s.min_rotors + static_cast<int>(secure_below(
-                              static_cast<uint32_t>(s.max_rotors - s.min_rotors + 1)))
-                        : fixed_count;
-            GeneratedSettings g = random_settings(s, n, plugs, notch_n);
-            std::string txt = settings_to_text(g);
-            if (i == 0) first = txt;
-            f << "\n# --- entry " << (i + 1) << " ---\n" << txt;
-        } catch (const std::exception& e) {
-            std::cout << "  ! " << e.what() << "\n";
-            return;
-        }
+    std::string first, err;
+    if (!write_key_sheet(path, s, count, plugs, notch_n, random_count, fixed_count, &first, &err)) {
+        std::cout << "  ! " << err << "\n";
+        return;
     }
     std::cout << "  " << count << " entries written to " << path << "\n";
 

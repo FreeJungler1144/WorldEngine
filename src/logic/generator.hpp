@@ -87,6 +87,20 @@ GeneratedSettings random_settings(const Suite& s, int rotor_count, int plug_pair
 // Serialise in the same directive format main.cpp reads.
 std::string settings_to_text(const GeneratedSettings& g);
 
+// Write `count` key sheet entries for `s` to `path`, overwriting it. Every
+// entry uses `fixed_count` rotors unless `random_count`, in which case each
+// entry draws its own count from the suite's range. `first_entry`, if given,
+// comes back holding entry 1, which is what lets a caller offer to install
+// it as inop.settings without generating a second one. Returns false and
+// fills *error on an I/O failure or a refused entry.
+//
+// This used to be inlined in the terminal maintenance menu, where the GUI
+// could not reach it. Both front ends go through here now so the sheet they
+// produce cannot drift apart.
+bool write_key_sheet(const std::string& path, const Suite& s, int count, int plug_pairs,
+                     int notches_per_rotor, bool random_count, int fixed_count,
+                     std::string* first_entry, std::string* error);
+
 // ── the interactive maintenance menu ────────────────────────────────────
 void run_generator();
 

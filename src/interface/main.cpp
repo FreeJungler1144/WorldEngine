@@ -1357,11 +1357,26 @@ int main(int argc, char** argv) {
 
     verify_legacy_integrity();
 
+    // ── the GUI is what this opens on ─────────────────────────────────
+    // Deliberately after the startup checks above, not before: the tracked
+    // key material check is a hard refusal, and opening a window first
+    // would let an operator work in a compromised setup without ever
+    // seeing it. A CLI-only build has no window to open and says nothing,
+    // it simply lands on the menu below.
+    if (gui_available()) {
+        if (run_gui_settings() == GuiExit::Quit) {
+            std::cout << DIM << "  closed.\n" << RST;
+            return 0;
+        }
+    }
+
     // ── mode choice ───────────────────────────────────────────────────
     while (true) {
         std::cout << "\n  1  run INOP\n"
                   << "  2  maintenance  " << DIM << "(generate wheels or key sheets)" << RST << "\n"
-                  << "  3  GUI  " << DIM << "(experimental, opt-in)" << RST << "\n"
+                  << "  3  GUI  " << DIM
+                  << (gui_available() ? "(back to the window)" : "(not built into this binary)")
+                  << RST << "\n"
                   << "  4  quit\n";
         std::string c = ask("choice [1]");
         if (c.empty() || c == "1") break;
@@ -1373,7 +1388,13 @@ int main(int argc, char** argv) {
             if (more > 0)
                 std::cout << DIM << "  wheel pool now " << more << " loaded wheels" << RST << "\n";
         }
-        if (c == "3") run_gui_settings();
+        // Going back to the window and then closing it with Exit means the
+        // same thing there as it does here, so it ends the process rather
+        // than dropping the operator back on this menu a second time.
+        if (c == "3" && run_gui_settings() == GuiExit::Quit) {
+            std::cout << DIM << "  closed.\n" << RST;
+            return 0;
+        }
     }
 
     Settings settings;

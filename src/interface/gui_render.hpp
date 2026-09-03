@@ -25,6 +25,19 @@ void render_shutdown();
 // Call whenever the framebuffer size changes (including at startup).
 void set_viewport(int width, int height);
 
+// How many pixels one logical unit is worth. Everything drawn is in
+// logical units, so raising this grows layout and text together and
+// nothing can overflow a control that fitted at 1.0 — which is what
+// separates a zoom from a font size. Callers work out their own logical
+// window size as pixels divided by this, and must divide incoming mouse
+// coordinates by it too, or hit testing lands in the wrong place.
+//
+// Re-applies the projection immediately using the framebuffer size last
+// handed to set_viewport, so a change takes effect on the next frame
+// without waiting for a resize.
+void set_ui_scale(float scale);
+float ui_scale();
+
 void clear(Color background);
 
 void draw_rect(float x, float y, float w, float h, Color c);
@@ -44,10 +57,18 @@ void end_scissor();
 // strip) without switching to the Wordmark typeface.
 enum class Font { Body, Wordmark, BodyLarge };
 
-// Bakes all font atlases from Times New Roman, one consistent typeface
-// across the whole panel. Returns false — with a stderr message — if the
-// file is missing, rather than falling back to a blank window.
-bool load_fonts();
+// Bakes all three atlases from one typeface, named by its filename inside
+// the system font directory (Times New Roman by default). One consistent
+// face across the whole panel, at three sizes. Returns false — with a
+// stderr message — if the file is missing, rather than falling back to a
+// blank window.
+//
+// Safe to call again on a live context: any atlas already baked is torn
+// down first, so the settings screen can change the typeface without
+// leaking a texture per change. A failed re-bake leaves no atlases at
+// all, so callers that can carry on (the settings screen, which has a
+// known-good face to fall back to) must re-call with one that works.
+bool load_fonts(const std::string& font_file = "times.ttf");
 
 float text_width(Font font, const std::string& text);
 float text_line_height(Font font);

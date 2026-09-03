@@ -83,6 +83,9 @@ if(INOP_WITH_GUI)
     src/interface/gui_setup_panel.cpp
     src/interface/gui_main_menu.cpp
     src/interface/gui_enciphering_panel.cpp
+    src/interface/gui_prefs.cpp
+    src/interface/gui_settings_panel.cpp
+    src/interface/gui_maintenance_panel.cpp
   )
 else()
   set(INOP_GUI_SOURCES src/interface/gui_stub.cpp)
@@ -132,7 +135,7 @@ foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
         # in the tree. suite() returns a reference into a function-local
         # static map and keeps nothing, so none of them dangle; the GCC 13
         # heuristic looks at the call expression, sees a temporary argument,
-        # and warns anyway. Four call sites could each be rewritten to bind
+        # and warns anyway. Each call site could be rewritten to bind
         # the literal to a named local first, which would silence a compiler
         # heuristic by making the code worse. Turned off here instead, and
         # only where -Werror would otherwise turn a false positive into a

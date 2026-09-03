@@ -1,0 +1,90 @@
+// gui_prefs.hpp — application-wide preferences, as opposed to the machine
+// configuration the setup screen edits.
+//
+// A machine configuration is message material: which rotors, which rings,
+// which key. It is saved per configuration under setup/ and travels with
+// the message. Nothing here does. These are preferences about the
+// application itself — how it looks, which window it opens in, which
+// typeface it draws with — so there is exactly one set of them, stored in
+// one file next to the executable.
+//
+// Deliberately knows nothing about GLFW, OpenGL or the widget set: the
+// settings screen edits this struct, and gui.cpp is what turns a changed
+// field into a re-baked font atlas or a fullscreen window.
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace inop {
+namespace gui {
+
+enum class Theme { Dark, Light };
+
+// The clinical types of colour vision deficiency, named as an operator
+// who knows their own diagnosis would look for them. Each mode picks
+// signalling colours that survive that deficiency — see the palette
+// tables in gui_widgets.cpp for what each one swaps.
+//
+// Protanopia and deuteranopia are both red-green deficiencies and take
+// the same safe palette. They are listed separately anyway because the
+// operator knows which one they have, and offering only a merged
+// "red-green" would make them guess whether it applies to them.
+enum class ColourblindMode { Off, Protanopia, Deuteranopia, Tritanopia, Achromatopsia };
+
+enum class WindowMode { Windowed, BorderlessFullscreen, Fullscreen };
+
+struct FontChoice {
+    std::string name;  // shown in the dropdown
+    std::string file;  // filename inside the Windows font directory
+};
+
+// Every face this build knows how to offer, filtered down to the ones
+// actually present in the system font directory — a machine missing
+// Georgia should not be shown Georgia. Times New Roman is first and is
+// the default; if even that is missing the list comes back empty and the
+// font row has nothing to offer.
+const std::vector<FontChoice>& available_fonts();
+
+// The preferences that currently do something. Rows the settings screen
+// draws locked (arachnophobia mode, font size, reduced motion, audio,
+// interface language) are deliberately absent: nothing reads them, so
+// nothing should store them either.
+struct GuiPrefs {
+    Theme theme = Theme::Dark;
+    ColourblindMode colourblind = ColourblindMode::Off;
+    WindowMode window_mode = WindowMode::Windowed;
+    std::string font_file = "times.ttf";
+    // Whole-interface scale as a percentage, so the stored value reads the
+    // same as the control that sets it. Kept as an int rather than a float
+    // because it only ever takes the fixed steps the dropdown offers, and
+    // a rounded percentage survives a round trip through JSON exactly.
+    int zoom_percent = 100;
+};
+
+// The steps the zoom control offers, 50 to 250 in 25s.
+const std::vector<int>& zoom_steps();
+
+// Above this, the layouts do not fit a normal window and the setting is
+// refused with a notice rather than applied. See gui.cpp, which owns that
+// policy because it owns the window.
+extern const int kMaxSupportedZoom;
+
+bool operator==(const GuiPrefs& a, const GuiPrefs& b);
+inline bool operator!=(const GuiPrefs& a, const GuiPrefs& b) { return !(a == b); }
+
+// Where the preferences live. One flat file next to the executable, not a
+// folder under setup/, which holds saved machine configurations and is
+// browsed as tiles.
+extern const char* const kPrefsPath;
+
+// Missing file, unreadable file and unparseable file are all the same
+// answer: `p` is left at its defaults and false comes back. A first run
+// has no preferences file and that is not an error, so callers ignore the
+// return value unless they want to report it.
+bool load_prefs(GuiPrefs& p, const std::string& path = kPrefsPath);
+
+bool save_prefs(const GuiPrefs& p, const std::string& path = kPrefsPath);
+
+}  // namespace gui
+}  // namespace inop
