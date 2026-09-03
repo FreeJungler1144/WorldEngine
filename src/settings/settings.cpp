@@ -4,6 +4,8 @@
 #include <fstream>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "registry.hpp"
 
 namespace inop {
@@ -109,23 +111,137 @@ bool validate_settings(const Settings& s, std::string* error) {
     return true;
 }
 
+namespace {
+
+// The schema is the one the GUI already writes into setup/*.json, so a
+// configuration saved by either interface opens in the other. The fields
+// below are the ones a Settings has; the pipeline options the GUI also
+// stores (double_pass, padding, moving_reflector, language_code) have no
+// home in this struct and are deliberately not invented here — see
+// save_settings for how they survive a round trip anyway.
+bool settings_from_json(const nlohmann::json& j, Settings& out, std::string* error) {
+    if (!j.is_object()) {
+        if (error) *error = "not a JSON object";
+        return false;
+    }
+    out = Settings{};
+    if (j.contains("suite_code") && j["suite_code"].is_string())
+        out.suite_code = j["suite_code"].get<std::string>();
+    if (j.contains("reflector") && j["reflector"].is_string())
+        out.reflector = j["reflector"].get<std::string>();
+    if (j.contains("master_key") && j["master_key"].is_string())
+        out.master_key = j["master_key"].get<std::string>();
+
+    if (j.contains("rotors") && j["rotors"].is_array()) {
+        for (const auto& r : j["rotors"]) {
+            if (!r.is_object()) continue;
+            out.rotors.push_back(upper(r.value("name", std::string())));
+            // The GUI writes ring as a string because the control behind it
+            // is a text field; anything thinking in integers writes a
+            // number. Both are accepted rather than making one interface
+            // wrong.
+            int ring = 1;
+            if (r.contains("ring")) {
+                if (r["ring"].is_string()) {
+                    const std::string t = r["ring"].get<std::string>();
+                    try {
+                        ring = std::stoi(t);
+                    } catch (...) {
+                        ring = 1;
+                    }
+                } else if (r["ring"].is_number_integer()) {
+                    ring = r["ring"].get<int>();
+                }
+            }
+            out.rings.push_back(ring);
+            out.notches.push_back(r.value("notches", std::string()));
+        }
+    }
+    if (j.contains("plugboard") && j["plugboard"].is_array())
+        for (const auto& p : j["plugboard"])
+            if (p.is_string()) out.plugs.push_back(p.get<std::string>());
+    return true;
+}
+
+nlohmann::json settings_to_json(const Settings& s) {
+    nlohmann::json j;
+    j["suite_code"] = s.suite_code;
+    j["reflector"] = s.reflector;
+    j["master_key"] = s.master_key;
+    j["rotor_count"] = static_cast<int>(s.rotors.size());
+
+    nlohmann::json rotors = nlohmann::json::array();
+    for (size_t i = 0; i < s.rotors.size(); ++i) {
+        nlohmann::json r;
+        r["name"] = s.rotors[i];
+        r["ring"] = std::to_string(i < s.rings.size() ? s.rings[i] : 1);
+        r["notches"] = i < s.notches.size() ? s.notches[i] : std::string();
+        rotors.push_back(r);
+    }
+    j["rotors"] = rotors;
+
+    nlohmann::json plugs = nlohmann::json::array();
+    for (const std::string& p : s.plugs) plugs.push_back(p);
+    j["plugboard"] = plugs;
+    return j;
+}
+
+}  // namespace
+
 bool load_settings(Settings& s, const std::string& path, std::string* error) {
     std::ifstream f(path);
     if (!f) { if (error) *error = "cannot open " + path; return false; }
-    return parse_and_validate(f, s, "no settings found in " + path, " in " + path, error);
+    nlohmann::json j = nlohmann::json::parse(f, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+        if (error) *error = path + " is not readable as JSON";
+        return false;
+    }
+    Settings out;
+    if (!settings_from_json(j, out, error)) return false;
+    std::string err;
+    if (!validate_settings(out, &err)) {
+        if (error) *error = err + " in " + path;
+        return false;
+    }
+    s = out;
+    return true;
 }
 
 bool save_settings(const Settings& s, const std::string& path) {
+    // Merge into whatever is already there rather than replacing it. A file
+    // written by the GUI carries pipeline options this struct has no field
+    // for, and rewriting from scratch would silently drop them — which is
+    // exactly the "two sets of settings" problem the JSON move was meant to
+    // end.
+    nlohmann::json doc = nlohmann::json::object();
+    {
+        std::ifstream in(path);
+        if (in) {
+            nlohmann::json existing = nlohmann::json::parse(in, nullptr, false);
+            if (!existing.is_discarded() && existing.is_object()) doc = existing;
+        }
+    }
+    nlohmann::json mine = settings_to_json(s);
+    for (auto it = mine.begin(); it != mine.end(); ++it) doc[it.key()] = it.value();
+
     std::ofstream f(path);
     if (!f) return false;
-    f << "suite " << s.suite_code << "\n";
-    f << "rotors";     for (auto& r : s.rotors)   f << " " << r; f << "\n";
-    f << "reflector "  << s.reflector << "\n";
-    f << "rings";      for (int r : s.rings)      f << " " << r; f << "\n";
-    f << "notches";    for (auto& n : s.notches)  f << " " << (n.empty() ? "-" : n); f << "\n";
-    f << "plugs";      for (auto& p : s.plugs)    f << " " << p; f << "\n";
-    f << "key " << s.master_key << "\n";
-    return true;
+    f << doc.dump(2) << "\n";
+    return static_cast<bool>(f);
+}
+
+bool migrate_settings_from_text(const std::string& txt_path, const std::string& json_path) {
+    // Same rule as the wheel conversion: never overwrite an existing JSON
+    // file with the contents of a stale text one, and never delete the
+    // original.
+    std::ifstream src(txt_path);
+    if (!src) return false;
+    { std::ifstream probe(json_path); if (probe) return false; }
+
+    Settings s;
+    if (!parse_and_validate(src, s, "no settings found in " + txt_path, " in " + txt_path, nullptr))
+        return false;
+    return save_settings(s, json_path);
 }
 
 Machine build_machine(const Settings& s, std::string* note) {
@@ -163,37 +279,48 @@ Machine build_machine(const Settings& s, std::string* note) {
                    Plugboard(s.plugs, alpha), s.rings, key, su.historic_lock);
 }
 
-int count_keysheet_entries(const std::string& path) {
+namespace {
+
+// One parse of the whole document, shared by the two functions below. A key
+// sheet is an object with an "entries" array, each entry the same shape as
+// a settings file, so one reader understands both.
+bool read_keysheet(const std::string& path, nlohmann::json& out) {
     std::ifstream f(path);
-    if (!f) return 0;
-    int n = 0;
-    std::string line;
-    while (std::getline(f, line))
-        if (line.compare(0, 12, "# --- entry ") == 0) ++n;
-    return n;
+    if (!f) return false;
+    nlohmann::json j = nlohmann::json::parse(f, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return false;
+    if (!j.contains("entries") || !j["entries"].is_array()) return false;
+    out = j;
+    return true;
 }
 
-bool load_keysheet_entry_from_stream(std::istream& in, int index, Settings& out, std::string* error) {
-    const std::string marker = "# --- entry " + std::to_string(index) + " ---";
-    std::string line;
-    bool found = false;
-    while (std::getline(in, line)) {
-        if (line == marker) { found = true; break; }
-    }
-    if (!found) { if (error) *error = "no entry " + std::to_string(index); return false; }
+}  // namespace
 
-    return parse_and_validate(in, out, "entry " + std::to_string(index) + " is incomplete",
-                               " (entry " + std::to_string(index) + ")", error);
+int count_keysheet_entries(const std::string& path) {
+    nlohmann::json j;
+    if (!read_keysheet(path, j)) return 0;
+    return static_cast<int>(j["entries"].size());
 }
 
 bool load_keysheet_entry(const std::string& path, int index, Settings& out, std::string* error) {
-    std::ifstream f(path);
-    if (!f) { if (error) *error = "cannot open " + path; return false; }
-    std::string err;
-    if (!load_keysheet_entry_from_stream(f, index, out, &err)) {
-        if (error) *error = err + " in " + path;
+    nlohmann::json j;
+    if (!read_keysheet(path, j)) {
+        if (error) *error = path + " is not a readable key sheet";
         return false;
     }
+    const nlohmann::json& arr = j["entries"];
+    if (index < 1 || index > static_cast<int>(arr.size())) {
+        if (error) *error = "no entry " + std::to_string(index) + " in " + path;
+        return false;
+    }
+    Settings s;
+    if (!settings_from_json(arr[static_cast<size_t>(index - 1)], s, error)) return false;
+    std::string err;
+    if (!validate_settings(s, &err)) {
+        if (error) *error = err + " (entry " + std::to_string(index) + " in " + path + ")";
+        return false;
+    }
+    out = s;
     return true;
 }
 

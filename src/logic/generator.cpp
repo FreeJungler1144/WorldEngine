@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "registry.hpp"
 #include "rng.hpp"
 
@@ -260,20 +262,15 @@ WheelBatch build_wheel_batch(const Suite& s, bool rotors, int count,
     Alphabet alpha(s.alphabet);
     WheelBatch b;
     b.rotors = rotors;
-    b.lines.reserve(static_cast<size_t>(count));
+    b.wheels.reserve(static_cast<size_t>(count));
     b.wirings.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
-        std::string name = prefix + std::to_string(start + i);
-        std::string w = rotors ? random_rotor_wiring(alpha) : random_reflector_wiring(alpha);
-        std::string line;
-        if (rotors) {
-            line = "rotor " + name + " " + w;
-            if (notch_n > 0) line += " " + random_notches(alpha, notch_n);
-        } else {
-            line = "reflector " + name + " " + w;
-        }
-        b.wirings.push_back(w);
-        b.lines.push_back(line);
+        GeneratedWheel g;
+        g.name = prefix + std::to_string(start + i);
+        g.wiring = rotors ? random_rotor_wiring(alpha) : random_reflector_wiring(alpha);
+        if (rotors && notch_n > 0) g.notches = random_notches(alpha, notch_n);
+        b.wirings.push_back(g.wiring);
+        b.wheels.push_back(g);
     }
     return b;
 }
@@ -288,32 +285,94 @@ bool write_wheel_batch(const std::string& path, const WheelBatch& b, const Suite
         if (error) *error = problem;
         return false;
     }
-    std::ofstream f(path, append ? std::ios::app : std::ios::trunc);
-    if (!f) {
-        if (error) *error = "cannot write " + path;
-        return false;
-    }
-    if (!append)
-        f << "# INOP wheel file\n# alphabet size decides which suite a wheel belongs to\n";
-    f << "# " << b.lines.size() << " " << (b.rotors ? "rotors" : "reflectors")
-      << " for " << s.name << "\n";
-    for (size_t i = 0; i < b.lines.size(); ++i) f << b.lines[i] << "\n";
-    f.close();
-    return true;
-}
+    const char* key = b.rotors ? "rotors" : "reflectors";
 
-bool write_key_sheet(const std::string& path, const Suite& s, int count, int plug_pairs,
-                     int notches_per_rotor, bool random_count, int fixed_count,
-                     std::string* first_entry, std::string* error) {
+    // Appending to JSON is a read-modify-write, not a seek to the end, so
+    // the existing document is parsed first. A target that is present but
+    // unreadable is refused rather than replaced: it may be the only copy
+    // of the wheels some traffic was enciphered under.
+    nlohmann::json doc = nlohmann::json::object();
+    if (append) {
+        std::ifstream in(path);
+        if (in) {
+            nlohmann::json existing = nlohmann::json::parse(in, nullptr, false);
+            if (existing.is_discarded() || !existing.is_object()) {
+                if (error)
+                    *error = path + " is not readable as JSON, so there is nothing to append to";
+                return false;
+            }
+            doc = existing;
+        }
+    }
+
+    nlohmann::json arr =
+        (doc.contains(key) && doc[key].is_array()) ? doc[key] : nlohmann::json::array();
+    for (const GeneratedWheel& g : b.wheels) {
+        nlohmann::json e;
+        e["name"] = g.name;
+        e["wiring"] = g.wiring;
+        if (!g.notches.empty()) e["notches"] = g.notches;
+        arr.push_back(e);
+    }
+    doc[key] = arr;
+    doc["suite"] = s.name;
+
+    // The whole document is assembled in memory and only then opened for
+    // writing, for the same reason validation happens before the stream is
+    // opened at all: opening for overwrite is itself destructive.
     std::ofstream f(path);
     if (!f) {
         if (error) *error = "cannot write " + path;
         return false;
     }
+    f << doc.dump(2) << "\n";
+    if (!f) {
+        if (error) *error = "failed while writing " + path;
+        return false;
+    }
+    return true;
+}
 
-    f << "# INOP key sheet — " << count << " entries for " << s.name << "\n";
-    f << "# copy one block into inop.settings to use it\n";
+namespace {
 
+// The same object shape settings.cpp reads back, so a key sheet entry and
+// a settings file are the same thing and one reader understands both.
+// Deliberately duplicated rather than shared: GeneratedSettings lives here
+// and Settings lives in src/settings, and giving the logic layer a
+// dependency on the settings layer to save eighteen lines would be the
+// wrong trade. If a third writer ever appears, that is the moment to make
+// one of them the definition.
+nlohmann::json generated_settings_to_json(const GeneratedSettings& g) {
+    nlohmann::json j;
+    j["suite_code"] = g.suite_code;
+    j["reflector"] = g.reflector;
+    j["master_key"] = g.master_key;
+    j["rotor_count"] = static_cast<int>(g.rotors.size());
+
+    nlohmann::json rotors = nlohmann::json::array();
+    for (size_t i = 0; i < g.rotors.size(); ++i) {
+        nlohmann::json r;
+        r["name"] = g.rotors[i];
+        r["ring"] = std::to_string(i < g.rings.size() ? g.rings[i] : 1);
+        r["notches"] = i < g.notches.size() ? g.notches[i] : std::string();
+        rotors.push_back(r);
+    }
+    j["rotors"] = rotors;
+
+    nlohmann::json plugs = nlohmann::json::array();
+    for (const std::string& p : g.plugs) plugs.push_back(p);
+    j["plugboard"] = plugs;
+    return j;
+}
+
+}  // namespace
+
+bool write_key_sheet(const std::string& path, const Suite& s, int count, int plug_pairs,
+                     int notches_per_rotor, bool random_count, int fixed_count,
+                     std::string* first_entry, std::string* error) {
+    // Built whole in memory before the target is opened, so a failure part
+    // way through a long sheet cannot leave a truncated one behind.
+    nlohmann::json entries = nlohmann::json::array();
     std::string first;
     for (int i = 0; i < count; ++i) {
         try {
@@ -322,13 +381,28 @@ bool write_key_sheet(const std::string& path, const Suite& s, int count, int plu
                               static_cast<uint32_t>(s.max_rotors - s.min_rotors + 1)))
                         : fixed_count;
             GeneratedSettings g = random_settings(s, n, plug_pairs, notches_per_rotor);
-            std::string txt = settings_to_text(g);
-            if (i == 0) first = txt;
-            f << "\n# --- entry " << (i + 1) << " ---\n" << txt;
-        } catch (const std::exception& e) {
-            if (error) *error = e.what();
+            nlohmann::json e = generated_settings_to_json(g);
+            if (i == 0) first = e.dump(2);
+            entries.push_back(e);
+        } catch (const std::exception& ex) {
+            if (error) *error = ex.what();
             return false;
         }
+    }
+
+    nlohmann::json doc;
+    doc["suite_code"] = s.code;
+    doc["entries"] = entries;
+
+    std::ofstream f(path);
+    if (!f) {
+        if (error) *error = "cannot write " + path;
+        return false;
+    }
+    f << doc.dump(2) << "\n";
+    if (!f) {
+        if (error) *error = "failed while writing " + path;
+        return false;
     }
     if (first_entry) *first_entry = first;
     return true;
@@ -356,7 +430,10 @@ void gen_wheels(bool rotors) {
     if (rotors && !s.notches_are_fixed)
         notch_n = ask_int("notches per rotor (0 = leave blank, set per message)", 0, 0, s.max_notches);
 
-    std::string path = ask("write to", "inop_wheels.txt");
+    // Rotors and reflectors default to their own files, which is the whole
+    // point of the split: a bad reflector cannot take the rotors down with
+    // it if they are not in the same document.
+    std::string path = ask("write to", rotors ? kRotorsPath : kReflectorsPath);
     std::string mode = ask("(a)ppend or (o)verwrite", "a");
     bool append = !mode.empty() && (mode[0] == 'a' || mode[0] == 'A');
 
@@ -399,8 +476,9 @@ void gen_wheels(bool rotors) {
     std::cout << "  " << loaded << " wheels now in the pool ("
               << available_rotors(s).size() << " rotors, "
               << available_reflectors(s).size() << " reflectors for " << s.name << ")\n";
-    if (path != "inop_wheels.txt")
-        std::cout << "  note: only inop_wheels.txt is loaded automatically at startup\n";
+    if (path != kRotorsPath && path != kReflectorsPath)
+        std::cout << "  note: only " << kRotorsPath << " and " << kReflectorsPath
+                  << " are loaded automatically at startup\n";
 }
 
 void gen_settings() {
@@ -441,7 +519,7 @@ void gen_settings() {
         }
     }
 
-    std::string path = ask("write to", "inop_keysheet.txt");
+    std::string path = ask("write to", "inop_keysheet.json");
     std::string first, err;
     if (!write_key_sheet(path, s, count, plugs, notch_n, random_count, fixed_count, &first, &err)) {
         std::cout << "  ! " << err << "\n";
@@ -449,7 +527,7 @@ void gen_settings() {
     }
     std::cout << "  " << count << " entries written to " << path << "\n";
 
-    std::string use = ask("load entry 1 into inop.settings now? (y/n)", "n");
+    std::string use = ask("load entry 1 into inop_settings.json now? (y/n)", "n");
     if (!use.empty() && (use[0] == 'y' || use[0] == 'Y')) {
         std::ofstream s1("inop.settings");
         if (s1) { s1 << first; std::cout << "  entry 1 written to inop.settings\n"; }

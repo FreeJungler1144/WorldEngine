@@ -126,20 +126,20 @@ void MaintenancePanel::open() {
     rotor_.prefix = "U";
     rotor_.start = "1";
     rotor_.notches = "0";
-    rotor_.path = "inop_wheels.txt";
+    rotor_.path = kRotorsPath;
 
     reflector_ = WheelForm{};
     reflector_.count = "10";
     reflector_.prefix = "K";
     reflector_.start = "1";
-    reflector_.path = "inop_wheels.txt";
+    reflector_.path = kReflectorsPath;
 
     sheet_ = SheetForm{};
     sheet_.entries = "360";
     sheet_.plug_pairs = std::to_string(suite("38").max_plug_pairs / 2);
     sheet_.notches = std::to_string(suite("38").max_notches);
     sheet_.rotor_count = std::to_string(suite("38").min_rotors);
-    sheet_.path = "inop_keysheet.txt";
+    sheet_.path = "inop_keysheet.json";
 
     open_dropdown_id_ = -1;
 }
@@ -428,8 +428,8 @@ void MaintenancePanel::generate_wheels(bool rotors) {
     f.status = std::to_string(count) + " " + what + (append ? " appended to " : " written to ") +
                f.path + "; pool now " + std::to_string(available_rotors(s).size()) +
                " rotors, " + std::to_string(available_reflectors(s).size()) + " reflectors";
-    if (f.path != "inop_wheels.txt")
-        f.status += " (only inop_wheels.txt is loaded automatically at startup)";
+    if (f.path != kRotorsPath && f.path != kReflectorsPath)
+        f.status += " (only the two default files are loaded automatically at startup)";
     f.status_error = false;
 }
 

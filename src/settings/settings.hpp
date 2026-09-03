@@ -48,21 +48,22 @@ bool save_settings(const Settings& s, const std::string& path);
 // the message is written there instead of being printed.
 Machine build_machine(const Settings& s, std::string* note = nullptr);
 
-// How many "# --- entry N ---" records a keysheet file has (0 if absent or
-// empty). Used to drive "iterate sequentially through every entry" batch
-// mode without hardcoding a count.
+// How many entries a key sheet holds (0 if absent, unreadable or empty).
+// A key sheet is JSON as of 2.3.0: an object with an "entries" array, each
+// entry the same shape as a settings file.
 int count_keysheet_entries(const std::string& path);
 
-// Parses just entry `index` (1-based) out of a keysheet file and validates
-// it. Used both for "one indexed entry for every message" and for
-// sequential iteration.
+// Parses entry `index` (1-based) out of a key sheet and validates it.
+//
+// The stream-scanning variant this used to sit beside is gone: it existed
+// so a batch caller reading entries in order paid O(1) per entry instead of
+// rescanning from the top, and a JSON document has to be parsed whole
+// regardless, so there was nothing left for it to save.
 bool load_keysheet_entry(const std::string& path, int index, Settings& out, std::string* error);
 
-// Same as load_keysheet_entry(), but scans forward from wherever `in` is
-// currently positioned instead of reopening the file and rescanning from
-// the top — for batch callers reading entries 1, 2, 3, ... in order from
-// one already-open stream, where reopening per entry would cost O(entries)
-// per call instead of O(1) amortized.
-bool load_keysheet_entry_from_stream(std::istream& in, int index, Settings& out, std::string* error);
+// One-time conversion of a 2.2.x plain-text settings file into JSON. Does
+// nothing and returns false if the text file is absent or the JSON one
+// already exists; the original is never deleted.
+bool migrate_settings_from_text(const std::string& txt_path, const std::string& json_path);
 
 }  // namespace inop

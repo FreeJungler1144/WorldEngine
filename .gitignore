@@ -12,6 +12,18 @@ probe.exe
 # Wheel files and key sheets are the secret. Committing them to a public
 # repo is the exact failure the whole design is meant to avoid: it hands an
 # analyst the machine's wiring and the day's settings in one place.
+#
+# The data files became JSON in 2.3.0 and the plain-text names are still
+# listed below them: a converted install has both on disk, and either one
+# committed is the same permanent compromise. *.json is deliberately not
+# blanket-ignored (CMakePresets.json and vcpkg.json are tracked), so every
+# key-material JSON file has to be named here explicitly. Anything new
+# that holds wiring, notches or a key belongs on this list the day it is
+# invented.
+inop_rotors.json
+inop_reflectors.json
+inop_keysheet.json
+inop_settings.json
 inop_wheels.txt
 inop_keysheet.txt
 inop.settings

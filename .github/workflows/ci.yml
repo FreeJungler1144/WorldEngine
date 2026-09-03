@@ -30,8 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: install ninja and nlohmann-json
+        run: sudo apt-get update && sudo apt-get install -y ninja-build nlohmann-json3-dev
       - name: configure
         run: cmake -S . -B build -G Ninja -DINOP_WERROR=ON -DCMAKE_BUILD_TYPE=Release
       - name: build
@@ -48,8 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: install ninja and nlohmann-json
+        run: sudo apt-get update && sudo apt-get install -y ninja-build nlohmann-json3-dev
       # The same flags as the cli-sanitize preset, spelled out rather than
       # --preset so this job does not depend on the compiler pin in the
       # preset file (g++.exe), which is a Windows path.
@@ -81,8 +81,12 @@ jobs:
       # warnings into errors on a compiler nobody has run would only
       # produce a red badge nobody can act on. Turn it on once the job is
       # green and the warnings are known.
+      - name: install nlohmann-json
+        run: vcpkg install nlohmann-json:x64-windows
       - name: configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
       - name: build
         run: cmake --build build --config Release
       - name: ctest

@@ -102,7 +102,9 @@ into the live message pipeline, and none reads or writes key material:
 Building by hand works too. `src/` is split by role (`logic/`, `settings/`,
 `interface/`, `benchmark-debug/`, see the header comment in
 `CMakeLists.txt`), so this needs `-I` for each and an explicit file list
-instead of a single `src/*.cpp` glob:
+instead of a single `src/*.cpp` glob. It also needs `nlohmann-json` on the
+include path — add `-I` for wherever your copy lives, since the data files
+are JSON:
 
 ```sh
 g++ -std=c++23 -O2 -Isrc/logic -Isrc/settings -Isrc/interface -o inop \
@@ -117,7 +119,12 @@ g++ -std=c++23 -O2 -Isrc/logic -Isrc/settings -Isrc/interface -o INOP.exe ^
     src/interface/gui_stub.cpp src/interface/main.cpp -lbcrypt    # Windows
 ```
 
-Built as C++23, zero dependencies beyond the compiler. On Windows,
+Built as C++23. One dependency, `nlohmann-json`, which is header-only:
+the wheel files, settings and key sheets are JSON as of 2.3.0, and the
+reader lives in `src/logic` and `src/settings`, so every build needs it
+rather than only the GUI. That cost was accepted deliberately in exchange
+for one file format across both interfaces — a configuration saved in the
+window opens in the terminal and the other way round. On Windows,
 `BCryptGenRandom` supplies entropy and needs `-lbcrypt`; everything else
 uses `/dev/urandom`. Nothing else is linked in a CLI-only build.
 
@@ -129,10 +136,10 @@ invocation) additionally builds a windowed interface: GLFW for the window
 and context, raw OpenGL for drawing, `stb_truetype` for text,
 `nlohmann-json` for the Save/Load Setup file format. It is reached from a
 menu option in the same terminal session, not a separate executable, and a
-CLI-only build (the default) never links any of it. This is a deliberate,
-bounded exception to the zero-dependency rule above. It doesnt touch the
-cipher core, doesnt change what a CLI-only build depends on, and doesnt
-open the door to a general GUI framework. The header comment in
+CLI-only build never links any of it. GLFW, OpenGL and `stb_truetype` stay
+GUI-only; `nlohmann-json` is the one that is now needed everywhere. This
+stays a deliberate, bounded exception: it doesnt touch the cipher core and
+doesnt open the door to a general GUI framework. The header comment in
 `src/interface/gui.hpp` draws the boundary.
 
 ### First session
@@ -156,7 +163,7 @@ Once a machine is configured, the session commands are:
 | `:d` | decipher a ciphertext (asks for the marker) |
 | `:b` | batch process pasted or file-based messages |
 | `:i` | show the active settings again |
-| `:s` | write the current settings to `inop.settings` |
+| `:s` | write the current settings to `inop_settings.json` |
 | `:q` | quit |
 
 Case doesnt matter for commands, and `:quit` / `:help` / `:info` also work.
@@ -196,7 +203,7 @@ A few features exist that are worth knowing about before you start:
   Capitalization is not restored, and output stays lowercase.
 - **Batch processing** (`:b`) reads a set of pasted or file-based messages
   and enciphers each one under a rotor configuration pulled from
-  `inop_keysheet.txt`, either one indexed entry for every message or
+  `inop_keysheet.json`, either one indexed entry for every message or
   sequentially through the file. Input files are capped at 1.44MB.
 - **Maintenance** (menu option 2) generates rotor batches, reflector
   batches, and key sheets, all checked against a live entropy self-test and
@@ -204,8 +211,21 @@ A few features exist that are worth knowing about before you start:
   worst failure this program can have, because it doesnt crash and its
   output still looks plausible.
 
-`inop_wheels.txt`, `inop_keysheet.txt` and `inop.settings` are real or
-potential key material and are in `.gitignore`. Never commit them.
+`inop_rotors.json`, `inop_reflectors.json`, `inop_keysheet.json` and
+`inop_settings.json` are real or potential key material and are in
+`.gitignore`. Never commit them. The 2.2.x names (`inop_wheels.txt`,
+`inop_keysheet.txt`, `inop.settings`) are still ignored too, because a
+converted install has both on disk.
+
+**Upgrading from 2.2.x:** the data files moved from plain text to JSON, and
+the wheel file split in two. Nothing has to be done by hand — on the first
+run, `inop_wheels.txt` is converted into `inop_rotors.json` plus
+`inop_reflectors.json`, and `inop.settings` into `inop_settings.json`. The
+originals are never deleted and never overwritten, and a conversion is
+skipped entirely if its target already exists, so a stale text file cannot
+replace current key material. Key sheets are not converted: regenerate one
+from the maintenance menu, or keep using the old build to read an old
+sheet.
 
 **Upgrading from an older build:** the alphabet case flip (INOP-38 is
 lowercase, Legacy stays uppercase) means anything generated under the old

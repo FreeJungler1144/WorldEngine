@@ -258,6 +258,20 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
         label(Rect{x, by + kBtnH + 6.0f, kColW, kRowH}, "Not applied yet.", true);
     }
 
+    // Footer. Plain text and nothing else for now, drawn as four separate
+    // labels rather than one string so each can become a link later
+    // without the row having to be laid out again.
+    {
+        const char* const items[] = {"License", "Legal", "Donate", "Support"};
+        float fy = by + kBtnH + 6.0f + kRowH + 4.0f;
+        float fx = x;
+        for (const char* item : items) {
+            float w_item = text_width(Font::Body, item);
+            label(Rect{fx, fy, w_item, kRowH}, item, true);
+            fx += w_item + 28.0f;
+        }
+    }
+
     draw_open_dropdown_popup(in, open_dropdown_id_);
 
     // Again after the popup, so a pick made this frame is not left sitting

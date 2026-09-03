@@ -35,10 +35,16 @@ set(INOP_SRC_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bombe
 )
 
-# The optional GUI (GLFW + raw OpenGL + stb_truetype) is
-# opt-in — the terminal build has zero mandatory dependencies beyond a
-# compiler either way. Off by default; enable with -DINOP_WITH_GUI=ON and a
-# vcpkg toolchain file (see CMakePresets.json's "gui" preset).
+# The optional GUI (GLFW + raw OpenGL + stb_truetype) is opt-in. Off by
+# default; enable with -DINOP_WITH_GUI=ON and a vcpkg toolchain file (see
+# CMakePresets.json's "gui" preset).
+#
+# NOTE: the terminal build no longer has zero mandatory dependencies. The
+# data files (wheels, settings, key sheets) are JSON as of 2.3.0, and the
+# reader lives in src/logic and src/settings, which compile into all four
+# executables — so nlohmann-json is required by every build, not just the
+# GUI. That trade was made deliberately: one file format across both
+# interfaces was worth more than the zero-dependency property.
 option(INOP_WITH_GUI "Build the optional GLFW/OpenGL settings-panel GUI" OFF)
 
 # Warnings as errors, off by default and on in CI. Deliberately not the
@@ -48,6 +54,10 @@ option(INOP_WITH_GUI "Build the optional GLFW/OpenGL settings-panel GUI" OFF)
 # constraint and runs with it on.
 option(INOP_WERROR "Treat compiler warnings as errors" OFF)
 
+# Needed by every target, GUI or not: the data-file format is JSON and the
+# reader is in the logic layer.
+find_package(nlohmann_json CONFIG REQUIRED)
+
 if(INOP_WITH_GUI)
   find_package(glfw3 CONFIG REQUIRED)
   find_package(OpenGL REQUIRED)
@@ -55,7 +65,6 @@ if(INOP_WITH_GUI)
   if(NOT STB_INCLUDE_DIR)
     message(FATAL_ERROR "stb_truetype.h not found — is vcpkg's 'stb' port installed via the toolchain file?")
   endif()
-  find_package(nlohmann_json CONFIG REQUIRED)
 endif()
 
 set(INOP_CORE_SOURCES
@@ -120,6 +129,7 @@ add_executable(inop_bombe
 
 foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
   target_include_directories(${tgt} PRIVATE ${INOP_SRC_DIRS})
+  target_link_libraries(${tgt} PRIVATE nlohmann_json::nlohmann_json)
 
   if(MSVC)
     target_compile_options(${tgt} PRIVATE /W4 /utf-8)
@@ -154,7 +164,7 @@ endforeach()
 # harness and has no reason to touch a window.
 if(INOP_WITH_GUI)
   target_include_directories(inop PRIVATE ${STB_INCLUDE_DIR})
-  target_link_libraries(inop PRIVATE glfw OpenGL::GL nlohmann_json::nlohmann_json)
+  target_link_libraries(inop PRIVATE glfw OpenGL::GL)
   if(MINGW)
     # Fully static, not just libgcc/libstdc++: this MinGW is the
     # posix-threads variant, so GLFW's threading support pulls in

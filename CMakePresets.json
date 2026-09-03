@@ -3,11 +3,13 @@
   "configurePresets": [
     {
       "name": "cli",
-      "displayName": "CLI only (no GUI, no vcpkg)",
+      "displayName": "CLI only (no GUI, still needs vcpkg for nlohmann-json)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/cli",
       "cacheVariables": {
         "INOP_WITH_GUI": "OFF",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-static",
         "CMAKE_CXX_COMPILER": "g++.exe"
       }
     },

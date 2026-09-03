@@ -448,7 +448,13 @@ void verify_legacy_integrity() {
 // whose path merely contains one of these names as a substring will trip
 // it, which fails closed. Of the two directions, that is the right one.
 std::vector<std::string> tracked_key_material() {
-    static const char* kNames[] = {"inop_wheels.txt", "inop_keysheet.txt", "inop.settings"};
+    // Both the 2.3.0 JSON names and the 2.2.x plain-text ones: an operator
+    // mid-migration has both on disk, and either committed is the same
+    // permanent compromise.
+    static const char* kNames[] = {"inop_rotors.json",  "inop_reflectors.json",
+                                   "inop_keysheet.json", "inop_settings.json",
+                                   "inop_wheels.txt",    "inop_keysheet.txt",
+                                   "inop.settings"};
 
     std::string dir = ".";
     std::string index;
@@ -993,7 +999,7 @@ int self_test() {
     {
         const Suite& s38 = suite("38");
         Alphabet a38(s38.alphabet);
-        const std::string scratch = "inop_selftest_scratch.txt";
+        const std::string scratch = "inop_selftest_scratch.json";
 
         // G1. The entropy check runs BEFORE generation, not after. A batch
         //     drawn from a dead source looks exactly like a good one, so
@@ -1013,7 +1019,7 @@ int self_test() {
         WheelBatch dup;
         dup.rotors = true;
         dup.wirings = {good.wirings[0], good.wirings[0]};
-        dup.lines = {good.lines[0], good.lines[0]};
+        dup.wheels = {good.wheels[0], good.wheels[0]};
         check(!wheel_batch_problem(dup, s38).empty(),
               "a batch with two identical wirings is refused");
 
@@ -1025,7 +1031,7 @@ int self_test() {
         WheelBatch caesar;
         caesar.rotors = true;
         caesar.wirings = {rot38};
-        caesar.lines = {"rotor SELFTESTROT " + rot38};
+        caesar.wheels = {GeneratedWheel{"SELFTESTROT", rot38, ""}};
         check(!wheel_batch_problem(caesar, s38).empty(),
               "a batch containing a pure rotation is refused at generation");
 
@@ -1070,10 +1076,14 @@ int self_test() {
 
         // G7. The wheel file is validated on LOAD, not only on generation,
         //     so a bad file left on disk cannot poison a later session.
+        //     Written as JSON by hand rather than through write_wheel_batch,
+        //     because write_wheel_batch refuses both of these at generation:
+        //     the point is to prove the load path checks them too.
         {
             std::ofstream f(scratch, std::ios::trunc);
-            f << "rotor SELFTESTD1 " << good.wirings[0] << "\n";
-            f << "rotor SELFTESTD2 " << good.wirings[0] << "\n";
+            f << R"({"rotors":[{"name":"SELFTESTD1","wiring":")" << good.wirings[0]
+              << R"("},{"name":"SELFTESTD2","wiring":")" << good.wirings[0] << R"("}]})"
+              << "\n";
         }
         std::vector<std::string> problems;
         check(load_wheel_file(scratch, &problems) == 0 && !problems.empty(),
@@ -1081,10 +1091,21 @@ int self_test() {
         problems.clear();
         {
             std::ofstream f(scratch, std::ios::trunc);
-            f << "rotor SELFTESTROT " << rot38 << "\n";
+            f << R"({"rotors":[{"name":"SELFTESTROT","wiring":")" << rot38 << R"("}]})" << "\n";
         }
         check(load_wheel_file(scratch, &problems) == 0 && !problems.empty(),
               "load_wheel_file rejects a file containing a rotation");
+
+        // G7b. A file that is not JSON at all is refused rather than
+        //      silently loading nothing, so a 2.2.x wheel file left in
+        //      place under its new name cannot pass as an empty pool.
+        problems.clear();
+        {
+            std::ofstream f(scratch, std::ios::trunc);
+            f << "rotor SELFTESTOLD " << good.wirings[0] << "\n";
+        }
+        check(load_wheel_file(scratch, &problems) == 0 && !problems.empty(),
+              "load_wheel_file rejects a file that is not JSON");
         std::remove(scratch.c_str());
 
         // G8. random_notches() clamps to a floor of one. A notch-less rotor
@@ -1186,8 +1207,8 @@ void run_batch_mode(const PipelineConfig& cfg) {
     if (messages.empty()) { fail("no messages found"); return; }
     std::cout << DIM << "  " << messages.size() << " message(s)" << RST << "\n";
 
-    std::string keysheet = ask("keysheet file [inop_keysheet.txt]");
-    if (keysheet.empty()) keysheet = "inop_keysheet.txt";
+    std::string keysheet = ask("keysheet file [inop_keysheet.json]");
+    if (keysheet.empty()) keysheet = "inop_keysheet.json";
     int entries = count_keysheet_entries(keysheet);
     if (entries == 0) { fail("no entries found in " + keysheet); return; }
     std::cout << DIM << "  " << entries << " config(s) available in " << keysheet << RST << "\n";
@@ -1227,14 +1248,11 @@ void run_batch_mode(const PipelineConfig& cfg) {
     Settings fixed_settings;
     std::optional<Machine> fixed_machine;
     std::optional<Pipeline> fixed_pipe;
-    std::ifstream sequential_stream;
     if (!sequential) {
         std::string err;
         if (!load_keysheet_entry(keysheet, fixed_index, fixed_settings, &err)) { fail(err); return; }
         fixed_machine.emplace(build_machine(fixed_settings));
         fixed_pipe.emplace(*fixed_machine, cfg);
-    } else {
-        sequential_stream.open(keysheet);
     }
 
     for (size_t i = 0; i < n; ++i) {
@@ -1245,7 +1263,7 @@ void run_batch_mode(const PipelineConfig& cfg) {
         Pipeline* pipe_ptr;
         if (sequential) {
             std::string err;
-            if (!load_keysheet_entry_from_stream(sequential_stream, idx, s, &err)) { fail(err); continue; }
+            if (!load_keysheet_entry(keysheet, idx, s, &err)) { fail(err); continue; }
             seq_machine.emplace(build_machine(s));
             seq_pipe.emplace(*seq_machine, cfg);
             pipe_ptr = &*seq_pipe;
@@ -1326,16 +1344,38 @@ int main(int argc, char** argv) {
     // Any wheels generated by the maintenance menu join the factory set —
     // but only if the file survives validation.
     {
-        std::vector<std::string> problems;
-        int extra = load_wheel_file("inop_wheels.txt", &problems);
+        // A 2.2.x plain-text wheel file is converted on the way past, once,
+        // and never deleted. Silent when there is nothing to do.
+        std::vector<std::string> mig;
+        int converted = migrate_wheels_from_text("inop_wheels.txt", kRotorsPath, kReflectorsPath,
+                                                 &mig);
+        if (converted > 0)
+            std::cout << DIM << "  converted " << converted << " wheels from inop_wheels.txt into "
+                      << kRotorsPath << " and " << kReflectorsPath
+                      << " (the original is left alone)" << RST << "\n";
+        for (size_t i = 0; i < mig.size(); ++i)
+            std::cout << RED << "  !! wheel conversion: " << mig[i] << RST << "\n";
+
+        // The settings file converts here too, not down where it is first
+        // read: a migration that only runs if the operator happens to pick
+        // "run INOP" is a migration that silently has not happened.
+        if (migrate_settings_from_text("inop.settings", "inop_settings.json"))
+            std::cout << DIM << "  converted inop.settings into inop_settings.json"
+                      << " (the original is left alone)" << RST << "\n";
+
+        int extra = 0;
+        for (const char* path : {kRotorsPath, kReflectorsPath}) {
+            std::vector<std::string> problems;
+            extra += load_wheel_file(path, &problems);
+            for (size_t i = 0; i < problems.size(); ++i)
+                std::cout << RED << "  !! " << path << ": " << problems[i] << RST << "\n";
+        }
         if (extra > 0)
-            std::cout << DIM << "  loaded " << extra << " wheels from inop_wheels.txt" << RST << "\n";
+            std::cout << DIM << "  loaded " << extra << " wheels" << RST << "\n";
         else
             std::cout << DIM << "  no generated wheels loaded — running on the built-in demo/"
                       << "regression wheels only; generate a batch before sending real traffic"
                       << RST << "\n";
-        for (size_t i = 0; i < problems.size(); ++i)
-            std::cout << RED << "  !! inop_wheels.txt: " << problems[i] << RST << "\n";
     }
 
     // Refuse loudly if key material has been committed. This is checked at
@@ -1384,7 +1424,7 @@ int main(int argc, char** argv) {
         if (c == "2") {
             run_generator();
             // a fresh batch may have just been written — pick it up
-            int more = load_wheel_file("inop_wheels.txt", 0);
+            int more = load_wheel_file(kRotorsPath, 0) + load_wheel_file(kReflectorsPath, 0);
             if (more > 0)
                 std::cout << DIM << "  wheel pool now " << more << " loaded wheels" << RST << "\n";
         }
@@ -1398,7 +1438,7 @@ int main(int argc, char** argv) {
     }
 
     Settings settings;
-    const std::string cfg_path = "inop.settings";
+    const std::string cfg_path = "inop_settings.json";
     bool loaded = false;
     {
         std::ifstream probe(cfg_path);

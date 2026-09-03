@@ -84,7 +84,29 @@ std::string duplicate_notch_symbols(const std::vector<std::string>& notches_per_
 // produces and neither is ever legitimate. Problems are appended to
 // *problems if given.
 // Returns the number of wheels loaded; 0 if the file is absent or rejected.
+//
+// The file is JSON as of 2.3.0: an object with optional "rotors" and
+// "reflectors" arrays of {name, wiring, notches}. Both keys being optional
+// is what lets the two default files below and a single combined file all
+// go through this one reader.
 int load_wheel_file(const std::string& path, std::vector<std::string>* problems = 0);
+
+// The two files loaded automatically at startup. Rotors and reflectors are
+// kept apart so a bad reflector cannot cost you every rotor: a wheel file
+// is rejected whole, and splitting them halves what one bad entry takes
+// down with it.
+extern const char* const kRotorsPath;      // inop_rotors.json
+extern const char* const kReflectorsPath;  // inop_reflectors.json
+
+// One-time conversion of a 2.2.x plain-text wheel file into the two JSON
+// files. Does nothing and returns 0 if the text file is absent, or if
+// either target already exists — replacing current key material with the
+// contents of a stale text file is the worst outcome available, so the
+// safe answer to any ambiguity is to leave everything alone. The original
+// is never deleted. Returns the number of wheels converted.
+int migrate_wheels_from_text(const std::string& txt_path, const std::string& rotors_path,
+                             const std::string& reflectors_path,
+                             std::vector<std::string>* problems = 0);
 
 // Every wheel usable with this suite — built in and loaded — sorted.
 std::vector<std::string> available_rotors(const Suite& s);

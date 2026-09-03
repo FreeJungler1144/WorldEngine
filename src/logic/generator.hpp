@@ -39,8 +39,19 @@ std::vector<std::string> random_variable_notches(const Alphabet& alpha, int roto
 // entropy source. The split is the seam that makes the guards in DESIGN
 // section 6 testable, and nothing about the behaviour changed with it.
 
+// One generated wheel. `notches` is empty for a reflector, and for a rotor
+// whose notches are left to be set per message.
+struct GeneratedWheel {
+    std::string name;
+    std::string wiring;
+    std::string notches;
+};
+
 struct WheelBatch {
-    std::vector<std::string> lines;    // ready-to-write file lines
+    // Held as data rather than as ready-to-write lines, which is what the
+    // 2.2.x text format let this be: the writer serialises it, so changing
+    // the file format does not change what a batch is.
+    std::vector<GeneratedWheel> wheels;
     std::vector<std::string> wirings;  // the same wheels, for validation
     bool rotors = true;
 };

@@ -6,6 +6,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <nlohmann/json.hpp>
+
 namespace inop {
 namespace {
 
@@ -188,12 +190,12 @@ std::string duplicate_notch_symbols(const std::vector<std::string>& notches_per_
     return out;
 }
 
-int load_wheel_file(const std::string& path, std::vector<std::string>* problems) {
-    std::ifstream f(path);
-    if (!f) return 0;
+namespace {
 
-    std::map<std::string, Wiring> rot;
-    std::map<std::string, std::string> refl;
+// The 2.2.x plain-text wheel file. Kept only so an existing one can be
+// converted on first run — nothing writes this format any more.
+void parse_wheel_text(std::istream& f, std::map<std::string, Wiring>& rot,
+                      std::map<std::string, std::string>& refl) {
     std::string line;
     while (std::getline(f, line)) {
         if (line.empty() || line[0] == '#') continue;
@@ -204,6 +206,47 @@ int load_wheel_file(const std::string& path, std::vector<std::string>* problems)
         if (kind == "rotor")          rot[name] = Wiring{wiring, notches};
         else if (kind == "reflector") refl[name] = wiring;
     }
+}
+
+// The JSON wheel format. Both arrays are optional, which is what lets the
+// two default files (rotors in one, reflectors in the other) and a single
+// combined file all go through one reader. An entry missing a name or a
+// wiring is skipped rather than fatal: the validation below is what
+// decides whether what did parse is fit to use.
+bool parse_wheel_json(std::istream& f, std::map<std::string, Wiring>& rot,
+                      std::map<std::string, std::string>& refl,
+                      std::vector<std::string>* problems) {
+    nlohmann::json j = nlohmann::json::parse(f, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+        note(problems, "not readable as JSON");
+        return false;
+    }
+    if (j.contains("rotors") && j["rotors"].is_array()) {
+        for (const auto& e : j["rotors"]) {
+            if (!e.is_object() || !e.contains("name") || !e.contains("wiring")) continue;
+            if (!e["name"].is_string() || !e["wiring"].is_string()) continue;
+            std::string notches;
+            if (e.contains("notches") && e["notches"].is_string())
+                notches = e["notches"].get<std::string>();
+            rot[e["name"].get<std::string>()] = Wiring{e["wiring"].get<std::string>(), notches};
+        }
+    }
+    if (j.contains("reflectors") && j["reflectors"].is_array()) {
+        for (const auto& e : j["reflectors"]) {
+            if (!e.is_object() || !e.contains("name") || !e.contains("wiring")) continue;
+            if (!e["name"].is_string() || !e["wiring"].is_string()) continue;
+            refl[e["name"].get<std::string>()] = e["wiring"].get<std::string>();
+        }
+    }
+    return true;
+}
+
+// Validation and installation, shared by every parser above. Unchanged
+// from when it was inline in load_wheel_file: it only ever looked at the
+// parsed maps, never at the file, which is why the format could change
+// without it moving.
+int install_wheels(std::map<std::string, Wiring>& rot, std::map<std::string, std::string>& refl,
+                   std::vector<std::string>* problems) {
     if (rot.empty() && refl.empty()) return 0;
 
     // ---- validate before anything is trusted -------------------------
@@ -271,6 +314,84 @@ int load_wheel_file(const std::string& path, std::vector<std::string>* problems)
     for (std::map<std::string, std::string>::const_iterator it = refl.begin(); it != refl.end(); ++it)
         loaded_reflectors()[it->first] = it->second;
     ++wheel_generation();
+    return static_cast<int>(rot.size() + refl.size());
+}
+
+// Write one side of the split. Only ever called by the migration below,
+// which is why it takes the already-parsed maps rather than a batch.
+bool write_wheel_json(const std::string& path, const std::map<std::string, Wiring>& rot,
+                      const std::map<std::string, std::string>& refl) {
+    nlohmann::json j;
+    if (!rot.empty()) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& kv : rot) {
+            nlohmann::json e;
+            e["name"] = kv.first;
+            e["wiring"] = kv.second.wiring;
+            if (!kv.second.notches.empty()) e["notches"] = kv.second.notches;
+            arr.push_back(e);
+        }
+        j["rotors"] = arr;
+    }
+    if (!refl.empty()) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& kv : refl) {
+            nlohmann::json e;
+            e["name"] = kv.first;
+            e["wiring"] = kv.second;
+            arr.push_back(e);
+        }
+        j["reflectors"] = arr;
+    }
+    std::ofstream f(path);
+    if (!f) return false;
+    f << j.dump(2) << "\n";
+    return static_cast<bool>(f);
+}
+
+}  // namespace
+
+const char* const kRotorsPath = "inop_rotors.json";
+const char* const kReflectorsPath = "inop_reflectors.json";
+
+int load_wheel_file(const std::string& path, std::vector<std::string>* problems) {
+    std::ifstream f(path);
+    if (!f) return 0;
+    std::map<std::string, Wiring> rot;
+    std::map<std::string, std::string> refl;
+    if (!parse_wheel_json(f, rot, refl, problems)) return 0;
+    return install_wheels(rot, refl, problems);
+}
+
+int migrate_wheels_from_text(const std::string& txt_path, const std::string& rotors_path,
+                             const std::string& reflectors_path,
+                             std::vector<std::string>* problems) {
+    // Nothing to convert, or the conversion already happened. Deliberately
+    // refuses to run if either target exists: overwriting a JSON wheel file
+    // with the contents of a stale text one would be destroying current key
+    // material with old key material, which is the worst outcome available.
+    std::ifstream src(txt_path);
+    if (!src) return 0;
+    { std::ifstream a(rotors_path), b(reflectors_path); if (a || b) return 0; }
+
+    std::map<std::string, Wiring> rot;
+    std::map<std::string, std::string> refl;
+    parse_wheel_text(src, rot, refl);
+    if (rot.empty() && refl.empty()) return 0;
+
+    // The originals are never deleted. They are key material, and a
+    // conversion that eats the only copy of the wheels a message was
+    // enciphered under is not a conversion, it is a loss.
+    std::map<std::string, std::string> no_refl;
+    std::map<std::string, Wiring> no_rot;
+    if (!rot.empty() && !write_wheel_json(rotors_path, rot, no_refl)) {
+        note(problems, "cannot write " + rotors_path);
+        return 0;
+    }
+    if (!refl.empty() && !write_wheel_json(reflectors_path, no_rot, refl)) {
+        note(problems, "cannot write " + reflectors_path);
+        return 0;
+    }
     return static_cast<int>(rot.size() + refl.size());
 }
 
