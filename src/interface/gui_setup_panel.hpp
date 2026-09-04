@@ -136,6 +136,12 @@ struct PanelUiState {
     std::string delete_confirm_path;
 
     float file_panel_scroll = 0.0f;
+
+    // The screen below the header scrolls, so the fixed top region cannot
+    // squeeze the rotor rows off the bottom at high zoom. content_h is last
+    // frame's measurement, which is what begin_scroll_region() asks for.
+    float setup_scroll = 0.0f;
+    float setup_content_h = 0.0f;
 };
 
 class SetupPanel {

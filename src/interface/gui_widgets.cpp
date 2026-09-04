@@ -168,7 +168,7 @@ void apply_colourblind(Colors& c, ColourblindMode mode, Theme theme) {
             c.error_bg = dark ? rgba(0.28f, 0.28f, 0.28f) : rgba(0.80f, 0.80f, 0.80f);
             c.error_text = dark ? rgba(1.00f, 1.00f, 1.00f) : rgba(0.04f, 0.04f, 0.04f);
             break;
-        case ColourblindMode::Off:
+        case ColourblindMode::Full:
         default:
             break;
     }
@@ -179,8 +179,12 @@ Colors g_current = dark_base();
 }  // namespace
 
 void set_palette(Theme theme, ColourblindMode mode) {
-    Colors c = theme == Theme::Light ? light_base() : dark_base();
-    apply_colourblind(c, mode, theme);
+    // Resolved once, here, so that neither the base choice below nor
+    // apply_colourblind() has to know that a third value exists. Callers
+    // may pass System freely; nothing downstream of this line ever sees it.
+    const Theme t = effective_theme(theme);
+    Colors c = t == Theme::Light ? light_base() : dark_base();
+    apply_colourblind(c, mode, t);
     g_current = c;
 }
 

@@ -21,11 +21,18 @@ constexpr float kLabelW = 250.0f;
 constexpr float kCtrlW = 300.0f;
 constexpr float kGap = 20.0f;
 
+// What the pinned footer reserves at the bottom of the screen: the gap
+// above the button row, the row itself, the status line under it, the link
+// row under that, and the bottom margin. Kept as a sum of the same
+// constants the footer lays itself out with, so moving any one of them
+// cannot leave the reserved height and the drawn height disagreeing.
+constexpr float kFooterH = kSectionGap + kBtnH + 6.0f + kRowH + 4.0f + kRowH + kMargin;
+
 // Stable within one frame and unique across the panel, which is all
 // dropdown() asks of them.
 constexpr int kIdColourblind = 1;
 constexpr int kIdFontSize = 2;
-constexpr int kIdResolution = 3;
+constexpr int kIdDisplayMode = 3;
 constexpr int kIdFont = 4;
 constexpr int kIdTheme = 5;
 constexpr int kIdLanguage = 6;
@@ -35,20 +42,25 @@ constexpr int kIdZoom = 7;
 // who knows their diagnosis finds it by name, and the operator who does
 // not can still tell which one describes them.
 const std::vector<std::string>& colourblind_options() {
-    static const std::vector<std::string> v{"Off", "Protanopia (red-blind)",
-                                            "Deuteranopia (green-blind)",
-                                            "Tritanopia (blue-yellow)",
-                                            "Achromatopsia (no colour)"};
+    static const std::vector<std::string> v{"Full", "Protanopia (red weak)",
+                                            "Deuteranopia (green weak)",
+                                            "Tritanopia (blue weak)",
+                                            "Achromatopsia (greyscale)"};
     return v;
 }
 
-const std::vector<std::string>& resolution_options() {
-    static const std::vector<std::string> v{"Windowed", "Borderless fullscreen", "Fullscreen"};
+// Named for what it sets. The old label said Resolution mode, which
+// promised a resolution picker this control has never had and is not
+// getting: a borderless window takes the resolution of the desktop.
+const std::vector<std::string>& display_mode_options() {
+    static const std::vector<std::string> v{"Fullscreen", "Borderless fullscreen", "Windowed"};
     return v;
 }
 
+// System setting leads and is the default: an operator who has already
+// told Windows which way they want it should not have to say so twice.
 const std::vector<std::string>& theme_options() {
-    static const std::vector<std::string> v{"Dark", "Light"};
+    static const std::vector<std::string> v{"System setting", "Light", "Dark"};
     return v;
 }
 
@@ -114,7 +126,7 @@ ColourblindMode colourblind_at(int idx) {
         case 2: return ColourblindMode::Deuteranopia;
         case 3: return ColourblindMode::Tritanopia;
         case 4: return ColourblindMode::Achromatopsia;
-        default: return ColourblindMode::Off;
+        default: return ColourblindMode::Full;
     }
 }
 
@@ -128,18 +140,37 @@ int index_of_colourblind(ColourblindMode m) {
     }
 }
 
+// Most invasive first, least invasive last, which is the order the
+// roadmap asks for and the order these three sit in every game options
+// screen. Borderless is the default and therefore the middle entry.
 WindowMode window_mode_at(int idx) {
     switch (idx) {
+        case 0: return WindowMode::Fullscreen;
         case 1: return WindowMode::BorderlessFullscreen;
-        case 2: return WindowMode::Fullscreen;
         default: return WindowMode::Windowed;
     }
 }
 
 int index_of_window_mode(WindowMode m) {
     switch (m) {
+        case WindowMode::Fullscreen: return 0;
         case WindowMode::BorderlessFullscreen: return 1;
-        case WindowMode::Fullscreen: return 2;
+        default: return 2;
+    }
+}
+
+Theme theme_at(int idx) {
+    switch (idx) {
+        case 1: return Theme::Light;
+        case 2: return Theme::Dark;
+        default: return Theme::System;
+    }
+}
+
+int index_of_theme(Theme t) {
+    switch (t) {
+        case Theme::Light: return 1;
+        case Theme::Dark: return 2;
         default: return 0;
     }
 }
@@ -174,7 +205,7 @@ void SettingsPanel::open(const GuiPrefs& current) {
     applied_ = current;
     colourblind_idx_ = index_of_colourblind(pending_.colourblind);
     window_mode_idx_ = index_of_window_mode(pending_.window_mode);
-    theme_idx_ = pending_.theme == Theme::Light ? 1 : 0;
+    theme_idx_ = index_of_theme(pending_.theme);
     font_idx_ = index_of_font(pending_.font_file);
     zoom_idx_ = index_of_zoom(pending_.zoom_percent);
     open_dropdown_id_ = -1;
@@ -209,7 +240,7 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
     // and the enum fields agree with what is on screen.
     pending_.colourblind = colourblind_at(colourblind_idx_);
     pending_.window_mode = window_mode_at(window_mode_idx_);
-    pending_.theme = theme_idx_ == 1 ? Theme::Light : Theme::Dark;
+    pending_.theme = theme_at(theme_idx_);
     pending_.zoom_percent = zoom_at(zoom_idx_);
     const std::vector<FontChoice>& fonts = available_fonts();
     if (!fonts.empty() && font_idx_ >= 0 && font_idx_ < static_cast<int>(fonts.size()))
@@ -218,7 +249,25 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
 
     float top = draw_header(in, w);
     float x = std::max(kMargin, (w - kColW) * 0.5f);
-    float start = begin_scroll_region(top, w, h, scroll_, content_h_, in);
+
+    // The footer is pinned to the bottom of the screen and sits outside the
+    // scroll region, so Apply, Reset and the status line stay reachable
+    // however far the page is scrolled.
+    //
+    // This reverses an earlier call. When the panels learned to scroll, the
+    // clamp that used to hold this row down was removed on the grounds that
+    // scrolling made it unnecessary and that a pinned row would fight a
+    // moving page. Scrolling is what makes the pin necessary instead: the
+    // page is now long enough to put its own commit controls out of sight,
+    // and the earlier fight only happened because the row was clamped while
+    // still living inside the scrolled content. Outside the region there is
+    // nothing to fight.
+    //
+    // Only this screen does it. The other panels commit as you go and have
+    // no footer worth protecting.
+    const float footer_top = h - kFooterH;
+
+    float start = begin_scroll_region(top, w, footer_top, scroll_, content_h_, in);
 
     float y = draw_accessibility(in, x, start);
     y = draw_graphics(in, x, y + kSectionGap);
@@ -226,11 +275,18 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
     y = draw_audio(x, y + kSectionGap);
     y = draw_interface(in, x, y + kSectionGap);
 
-    // The button row simply follows the sections now. It used to be clamped
-    // to the bottom of the window so it could not be pushed off screen;
-    // scrolling is the better answer to that, and the clamp would fight it
-    // by pinning the buttons while everything above them moved.
-    float by = y + kSectionGap;
+    // Measured from where the content actually began, so the scroll clamp is
+    // right whatever the zoom does to the row heights. The footer is no
+    // longer part of it.
+    content_h_ = (y + kMargin) - start;
+
+    end_scroll_region(top, w, footer_top, scroll_, content_h_);
+
+    // A rule rather than nothing, so the pinned row reads as a footer and
+    // not as a section that happens to have stopped moving.
+    draw_rect(0.0f, footer_top, w, 1.0f, palette::border());
+
+    float by = footer_top + kSectionGap;
 
     bool dirty = pending_ != applied_;
     if (button(Rect{x, by, kBtnW, kBtnH}, "Apply", in, dirty, true)) apply_pending_ = true;
@@ -241,7 +297,7 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
         pending_ = GuiPrefs{};
         colourblind_idx_ = index_of_colourblind(pending_.colourblind);
         window_mode_idx_ = index_of_window_mode(pending_.window_mode);
-        theme_idx_ = 0;
+        theme_idx_ = index_of_theme(pending_.theme);
         font_idx_ = index_of_font(pending_.font_file);
         zoom_idx_ = index_of_zoom(pending_.zoom_percent);
         status_.clear();
@@ -273,12 +329,7 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
             label(Rect{fx, fy, w_item, kRowH}, item, true);
             fx += w_item + 28.0f;
         }
-        // Measured from where the content actually began, so the scroll
-        // clamp is right whatever the zoom does to the row heights.
-        content_h_ = (fy + kRowH + kMargin) - start;
     }
-
-    end_scroll_region(top, w, h, scroll_, content_h_);
 
     // After the region ends, so an open dropdown can overhang it instead of
     // being clipped at the bottom edge.
@@ -288,7 +339,7 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
     // only in the index until the next one.
     pending_.colourblind = colourblind_at(colourblind_idx_);
     pending_.window_mode = window_mode_at(window_mode_idx_);
-    pending_.theme = theme_idx_ == 1 ? Theme::Light : Theme::Dark;
+    pending_.theme = theme_at(theme_idx_);
     pending_.zoom_percent = zoom_at(zoom_idx_);
     if (!fonts.empty() && font_idx_ >= 0 && font_idx_ < static_cast<int>(fonts.size()))
         pending_.font_file = fonts[static_cast<size_t>(font_idx_)].file;
@@ -324,7 +375,7 @@ float SettingsPanel::draw_accessibility(const GuiInput& in, float x, float y) {
     toggle(control_rect(x, y), arachnophobia_, "nothing in the interface to hide yet", in, false);
     y += kRowH + kRowGap;
 
-    row_label(x, y, "Colourblind mode", false);
+    row_label(x, y, "Colour vision", false);
     dropdown(control_rect(x, y), colourblind_options(), colourblind_idx_, kIdColourblind,
              open_dropdown_id_, in, true);
     y += kRowH + kRowGap;
@@ -341,8 +392,8 @@ float SettingsPanel::draw_accessibility(const GuiInput& in, float x, float y) {
 float SettingsPanel::draw_graphics(const GuiInput& in, float x, float y) {
     y = heading(x, y, "Graphics");
 
-    row_label(x, y, "Resolution mode", false);
-    dropdown(control_rect(x, y), resolution_options(), window_mode_idx_, kIdResolution,
+    row_label(x, y, "Display mode", false);
+    dropdown(control_rect(x, y), display_mode_options(), window_mode_idx_, kIdDisplayMode,
              open_dropdown_id_, in, true);
     y += kRowH + kRowGap;
 
@@ -373,7 +424,7 @@ float SettingsPanel::draw_appearance(const GuiInput& in, float x, float y) {
     if (!have_fonts) row_note(x, y, "no usable font file in the system font folder");
     y += kRowH + kRowGap;
 
-    row_label(x, y, "Light / dark mode", false);
+    row_label(x, y, "App mode", false);
     dropdown(control_rect(x, y), theme_options(), theme_idx_, kIdTheme, open_dropdown_id_, in,
              true);
     y += kRowH;

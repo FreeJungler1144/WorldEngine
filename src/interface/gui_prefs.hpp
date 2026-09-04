@@ -19,7 +19,20 @@
 namespace inop {
 namespace gui {
 
-enum class Theme { Dark, Light };
+// System is a stored preference rather than a palette: it means "whatever
+// the operating system is set to", and it is the default because an
+// operator who has already told Windows they want dark should not have to
+// tell this application separately. It is never a colour. Everything that
+// paints goes through effective_theme() below, which resolves it to one of
+// the other two before any palette code sees it.
+enum class Theme { System, Dark, Light };
+
+// Resolves System by asking the operating system, and returns Dark or
+// Light unchanged. On Windows that is the AppsUseLightTheme preference.
+// Anywhere else, and on a Windows that will not answer, the fallback is
+// Dark, which is this application's own default and the safer of the two
+// to be wrong about in a dim room.
+Theme effective_theme(Theme t);
 
 // The clinical types of colour vision deficiency, named as an operator
 // who knows their own diagnosis would look for them. Each mode picks
@@ -30,7 +43,7 @@ enum class Theme { Dark, Light };
 // the same safe palette. They are listed separately anyway because the
 // operator knows which one they have, and offering only a merged
 // "red-green" would make them guess whether it applies to them.
-enum class ColourblindMode { Off, Protanopia, Deuteranopia, Tritanopia, Achromatopsia };
+enum class ColourblindMode { Full, Protanopia, Deuteranopia, Tritanopia, Achromatopsia };
 
 enum class WindowMode { Windowed, BorderlessFullscreen, Fullscreen };
 
@@ -51,9 +64,9 @@ const std::vector<FontChoice>& available_fonts();
 // interface language) are deliberately absent: nothing reads them, so
 // nothing should store them either.
 struct GuiPrefs {
-    Theme theme = Theme::Dark;
-    ColourblindMode colourblind = ColourblindMode::Off;
-    WindowMode window_mode = WindowMode::Windowed;
+    Theme theme = Theme::System;
+    ColourblindMode colourblind = ColourblindMode::Full;
+    WindowMode window_mode = WindowMode::BorderlessFullscreen;
     std::string font_file = "times.ttf";
     // Whole-interface scale as a percentage, so the stored value reads the
     // same as the control that sets it. Kept as an int rather than a float

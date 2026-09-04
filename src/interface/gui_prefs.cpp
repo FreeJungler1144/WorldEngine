@@ -5,6 +5,14 @@
 
 #include <nlohmann/json.hpp>
 
+// Only for effective_theme(), which has to ask Windows which way the
+// system theme is set. Nothing else in this file touches the platform.
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace inop {
 namespace gui {
 
@@ -15,9 +23,22 @@ namespace {
 // Written as names rather than integers so the file stays legible and a
 // future reordering of the enums cannot silently reinterpret a saved
 // value as a different setting.
-const char* theme_name(Theme t) { return t == Theme::Light ? "light" : "dark"; }
+const char* theme_name(Theme t) {
+    switch (t) {
+        case Theme::Light: return "light";
+        case Theme::Dark: return "dark";
+        default: return "system";
+    }
+}
 
-Theme theme_from(const std::string& s) { return s == "light" ? Theme::Light : Theme::Dark; }
+// An older preferences file holds "dark" or "light" and keeps meaning
+// exactly what it did. Only an unrecognised value lands on System, which
+// is also what a fresh install gets.
+Theme theme_from(const std::string& s) {
+    if (s == "light") return Theme::Light;
+    if (s == "dark") return Theme::Dark;
+    return Theme::System;
+}
 
 const char* colourblind_name(ColourblindMode m) {
     switch (m) {
@@ -25,7 +46,7 @@ const char* colourblind_name(ColourblindMode m) {
         case ColourblindMode::Deuteranopia: return "deuteranopia";
         case ColourblindMode::Tritanopia: return "tritanopia";
         case ColourblindMode::Achromatopsia: return "achromatopsia";
-        default: return "off";
+        default: return "full";
     }
 }
 
@@ -37,12 +58,14 @@ ColourblindMode colourblind_from(const std::string& s) {
     // The names these modes were saved under before they were given their
     // clinical ones. Read but never written, so a preferences file written
     // by an older build keeps working instead of silently reverting to
-    // off. "red-green" becomes deuteranopia, the commoner of the two it
-    // used to cover. "red-blue" and "blue-green" describe no clinical type
-    // and have no successor, so they fall through to off.
+    // full colour. "red-green" becomes deuteranopia, the commoner of the
+    // two it used to cover. "red-blue" and "blue-green" describe no
+    // clinical type and have no successor, so they fall through. So does
+    // "off", which is what full colour was called before it was named for
+    // what it is rather than for what it is not.
     if (s == "red-green") return ColourblindMode::Deuteranopia;
     if (s == "monochrome") return ColourblindMode::Achromatopsia;
-    return ColourblindMode::Off;
+    return ColourblindMode::Full;
 }
 
 const char* window_mode_name(WindowMode m) {
@@ -71,6 +94,25 @@ bool font_present(const std::string& file) {
 
 }  // namespace
 
+Theme effective_theme(Theme t) {
+    if (t != Theme::System) return t;
+#if defined(_WIN32)
+    // The value Windows itself uses for application chrome, as opposed to
+    // the separate one for the taskbar and Start. Nonzero means light.
+    // Read on every call rather than cached, so changing the system theme
+    // while INOP is running is picked up the next time the palette is set
+    // instead of needing a restart.
+    DWORD light = 0;
+    DWORD size = sizeof(light);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light,
+                     &size) == ERROR_SUCCESS)
+        return light ? Theme::Light : Theme::Dark;
+#endif
+    return Theme::Dark;
+}
+
 const std::vector<FontChoice>& available_fonts() {
     static const std::vector<FontChoice> found = [] {
         const FontChoice candidates[] = {
@@ -88,17 +130,28 @@ const std::vector<FontChoice>& available_fonts() {
 }
 
 const std::vector<int>& zoom_steps() {
-    static const std::vector<int> v{50, 75, 100, 125, 150, 175, 200, 225, 250};
+    // Dense near 100 and sparse at the extremes, which is what browsers and
+    // Windows both ship: 25 points is a small relative change at 200% and a
+    // large one at 75%, so uniform steps waste entries where they are least
+    // useful. Every value here is reachable; the list stops where the
+    // layouts stop.
+    static const std::vector<int> v{50, 70, 80, 90, 100, 110, 120, 135, 150, 175, 200};
     return v;
 }
 
-// Raised from 125 once the settings and maintenance screens learned to
-// scroll. The binding constraint is now the setup screen, which does not
-// scroll but does adapt: its header and top row are a fixed 300 logical
-// pixels, so at 200% they take 300 of the 475 the window has left and the
-// rotor rows below them stop being usable. Lifting this further means
-// giving that screen's fixed top region the same scrolling treatment.
-const int kMaxSupportedZoom = 175;
+// Raised from 125 to 175 once the settings and maintenance screens learned
+// to scroll, and from 175 to 200 once the setup screen did too. That last
+// one was the binding constraint: its header and top row are a fixed 300
+// logical pixels, and the bottom row took whatever was left, so the higher
+// the scale the less room the rotor rows had. The bottom row is laid out at
+// its natural height now and everything under the header scrolls, so the
+// fixed region can no longer squeeze anything off the screen.
+//
+// 200 is where the list stops rather than where the layouts do, because 200
+// is the number SC 1.4.4 asks for and there is no demand past it. The
+// ceiling and zoom_steps() must agree: a value offered but refused makes the
+// control lie about what it can do.
+const int kMaxSupportedZoom = 200;
 
 bool operator==(const GuiPrefs& a, const GuiPrefs& b) {
     return a.theme == b.theme && a.colourblind == b.colourblind &&

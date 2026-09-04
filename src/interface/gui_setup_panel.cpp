@@ -339,13 +339,39 @@ void SetupPanel::frame(const GuiInput& real_in, int width, int height) {
 
     draw_header(in, w);
 
-    float top_y = header_h;
-    draw_top_row(in, w, top_y, top_h);
+    // The bottom row used to be handed whatever vertical space was left
+    // over, which is what put a ceiling on the zoom: header and top row are
+    // a fixed 300 logical pixels, so the higher the scale the less was left
+    // for the rotor rows, until they stopped being usable. It is given its
+    // natural height instead now, and everything below the header scrolls.
+    //
+    // Natural height of the left column, measured the same way
+    // draw_bottom_row lays it out: the optional rotor-count block, the
+    // rotor grid, then the reflector label and its box.
+    const Suite& su_layout = suite(state_.suite_code);
+    const bool has_rotor_count = su_layout.min_rotors != su_layout.max_rotors;
+    const int layout_rows = su_layout.historic_lock ? su_layout.max_rotors : kMaxRotors;
+    const float left_natural =
+        (has_rotor_count ? 56.0f : 0.0f) + (layout_rows * 30.0f + 20.0f) + 58.0f;
 
-    float bottom_y = top_y + top_h;
-    float bottom_h = h - bottom_y;
-    if (bottom_h > 10.0f) draw_bottom_row(in, w, bottom_y, bottom_h);
+    // And of the right column: the plugboard header, then five rows at a
+    // height that leaves the 28px boxes room to breathe rather than being
+    // divided out of whatever was available.
+    const float plug_natural = 24.0f + 5 * 40.0f;
 
+    const float bottom_h = (left_natural > plug_natural ? left_natural : plug_natural) + 16.0f;
+
+    float start = begin_scroll_region(header_h, w, h, ui_.setup_scroll, ui_.setup_content_h, in);
+
+    draw_top_row(in, w, start, top_h);
+    draw_bottom_row(in, w, start + top_h, bottom_h);
+
+    ui_.setup_content_h = top_h + bottom_h;
+
+    end_scroll_region(header_h, w, h, ui_.setup_scroll, ui_.setup_content_h);
+
+    // Both of these draw over the whole screen and must not be clipped to
+    // the region, so they come after it ends.
     if (any_file_modal) draw_file_overlays(real_in, w, h);
     // Must run before sync_state_from_indices(): a popup-item click is
     // handled in here (see gui_widgets::draw_open_dropdown_popup), and it
