@@ -158,12 +158,17 @@ void MaintenancePanel::frame(const GuiInput& in, int width, int height) {
 
     float top = draw_header(in, w);
     float x = std::max(kMargin, (w - kColW) * 0.5f);
+    float start = begin_scroll_region(top, w, h, scroll_, content_h_, in);
 
-    float y = draw_wheels(in, x, top, true);
+    float y = draw_wheels(in, x, start, true);
     y = draw_wheels(in, x, y + kSectionGap, false);
     y = draw_key_sheet(in, x, y + kSectionGap);
-    (void)h;
+    content_h_ = (y + kMargin) - start;
 
+    end_scroll_region(top, w, h, scroll_, content_h_);
+
+    // After the region ends, so an open dropdown can overhang it instead of
+    // being clipped at the bottom edge.
     draw_open_dropdown_popup(in, open_dropdown_id_);
     end_widget_frame(in);
 }

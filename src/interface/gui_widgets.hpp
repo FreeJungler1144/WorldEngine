@@ -147,6 +147,31 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
 // Call this once, last, every frame.
 void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id);
 
+// ── scrolling ───────────────────────────────────────────────────────────
+//
+// Vertical scrolling for a panel's whole content area, for when the layout
+// is taller than the window. Zoom made that routine rather than rare: at
+// 150% a panel needs half again the vertical space it was laid out for.
+//
+// Immediate mode has a chicken and egg here — the content height is only
+// known once the content has been laid out — so the caller keeps last
+// frame's measurement and hands it back. One frame of lag on the clamp is
+// invisible, and the first frame simply cannot scroll.
+//
+// Returns the y the caller should lay its first row out at: the requested
+// top, shifted up by however far the region is scrolled. Everything drawn
+// between the two calls is clipped to the region, so content cannot spill
+// over the header above it.
+float begin_scroll_region(float top, float width, float height, float& scroll,
+                          float content_height, const GuiInput& in);
+
+// Ends the region and draws the position indicator down the right edge.
+// `content_height` is what the caller measured this frame. Call any
+// dropdown popup AFTER this, so a popup can overhang the region rather
+// than being clipped by it.
+void end_scroll_region(float top, float width, float height, float scroll,
+                       float content_height);
+
 // ── modals ──────────────────────────────────────────────────────────────
 //
 // A modal is drawn over a whole screen, so unlike every other widget here

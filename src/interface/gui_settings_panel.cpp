@@ -218,16 +218,19 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
 
     float top = draw_header(in, w);
     float x = std::max(kMargin, (w - kColW) * 0.5f);
+    float start = begin_scroll_region(top, w, h, scroll_, content_h_, in);
 
-    float y = draw_accessibility(in, x, top);
+    float y = draw_accessibility(in, x, start);
     y = draw_graphics(in, x, y + kSectionGap);
     y = draw_appearance(in, x, y + kSectionGap);
     y = draw_audio(x, y + kSectionGap);
     y = draw_interface(in, x, y + kSectionGap);
 
-    // The button row follows the sections, but never off the bottom of a
-    // short window.
-    float by = std::min(y + kSectionGap, h - kMargin - kBtnH - 24.0f);
+    // The button row simply follows the sections now. It used to be clamped
+    // to the bottom of the window so it could not be pushed off screen;
+    // scrolling is the better answer to that, and the clamp would fight it
+    // by pinning the buttons while everything above them moved.
+    float by = y + kSectionGap;
 
     bool dirty = pending_ != applied_;
     if (button(Rect{x, by, kBtnW, kBtnH}, "Apply", in, dirty, true)) apply_pending_ = true;
@@ -270,8 +273,15 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
             label(Rect{fx, fy, w_item, kRowH}, item, true);
             fx += w_item + 28.0f;
         }
+        // Measured from where the content actually began, so the scroll
+        // clamp is right whatever the zoom does to the row heights.
+        content_h_ = (fy + kRowH + kMargin) - start;
     }
 
+    end_scroll_region(top, w, h, scroll_, content_h_);
+
+    // After the region ends, so an open dropdown can overhang it instead of
+    // being clipped at the bottom edge.
     draw_open_dropdown_popup(in, open_dropdown_id_);
 
     // Again after the popup, so a pick made this frame is not left sitting

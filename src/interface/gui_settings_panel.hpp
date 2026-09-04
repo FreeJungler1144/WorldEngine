@@ -79,6 +79,12 @@ private:
     int font_size_idx_ = 1;  // Normal
     int language_idx_ = 0;
 
+    // How far the content is scrolled, and how tall it measured last frame.
+    // The second is what the clamp needs and can only be known after a
+    // layout pass, so it lags by one frame by construction.
+    float scroll_ = 0.0f;
+    float content_h_ = 0.0f;
+
     int open_dropdown_id_ = -1;
     std::string status_;
     bool status_error_ = false;

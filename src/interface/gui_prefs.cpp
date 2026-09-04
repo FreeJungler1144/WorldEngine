@@ -92,7 +92,13 @@ const std::vector<int>& zoom_steps() {
     return v;
 }
 
-const int kMaxSupportedZoom = 125;
+// Raised from 125 once the settings and maintenance screens learned to
+// scroll. The binding constraint is now the setup screen, which does not
+// scroll but does adapt: its header and top row are a fixed 300 logical
+// pixels, so at 200% they take 300 of the 475 the window has left and the
+// rotor rows below them stop being usable. Lifting this further means
+// giving that screen's fixed top region the same scrolling treatment.
+const int kMaxSupportedZoom = 175;
 
 bool operator==(const GuiPrefs& a, const GuiPrefs& b) {
     return a.theme == b.theme && a.colourblind == b.colourblind &&

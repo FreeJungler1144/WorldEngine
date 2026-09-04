@@ -707,7 +707,7 @@ void SetupPanel::draw_file_overlays(const GuiInput& in, float w, float h) {
             ui_.create_name_error = ui_.create_name_text.empty()
                                          ? "no auto-numbered slot left (max " +
                                                std::to_string(kMaxSavedPerSuite) +
-                                               " per machine) — type a custom name"
+                                               " per machine), type a custom name"
                                          : "";
         }
         if (under_in.mouse_pressed && !rect_contains(box, under_in.mouse_x, under_in.mouse_y))

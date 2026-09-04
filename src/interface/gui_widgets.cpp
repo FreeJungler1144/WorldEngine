@@ -523,6 +523,52 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
     }
 }
 
+// ── scrolling ───────────────────────────────────────────────────────────
+
+namespace {
+
+constexpr float kScrollStep = 48.0f;
+constexpr float kScrollBarW = 4.0f;
+
+float scroll_span(float top, float height, float content_height) {
+    float view_h = height - top;
+    return content_height > view_h ? content_height - view_h : 0.0f;
+}
+
+}  // namespace
+
+float begin_scroll_region(float top, float width, float height, float& scroll,
+                          float content_height, const GuiInput& in) {
+    const float max_scroll = scroll_span(top, height, content_height);
+
+    // Only while the pointer is actually over the region, so a wheel event
+    // meant for something else does not move the page underneath it.
+    if (in.scroll_y != 0.0 && in.mouse_y >= top)
+        scroll -= static_cast<float>(in.scroll_y) * kScrollStep;
+
+    if (scroll > max_scroll) scroll = max_scroll;
+    if (scroll < 0.0f) scroll = 0.0f;
+
+    begin_scissor(0.0f, top, width, height - top);
+    return top - scroll;
+}
+
+void end_scroll_region(float top, float width, float height, float scroll,
+                       float content_height) {
+    end_scissor();
+
+    const float max_scroll = scroll_span(top, height, content_height);
+    if (max_scroll <= 0.0f) return;  // everything fits; no bar to draw
+
+    const float view_h = height - top;
+    const float track_x = width - kScrollBarW - 2.0f;
+    draw_rect(track_x, top, kScrollBarW, view_h, palette::disabled_bg());
+
+    float thumb_h = std::max(24.0f, view_h * (view_h / content_height));
+    float thumb_y = top + (view_h - thumb_h) * (scroll / max_scroll);
+    draw_rect(track_x, thumb_y, kScrollBarW, thumb_h, palette::accent());
+}
+
 // ── modals ──────────────────────────────────────────────────────────────
 
 namespace {
