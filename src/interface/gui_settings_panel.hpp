@@ -86,6 +86,7 @@ private:
     bool arachnophobia_ = false;
     int font_size_idx_ = 1;  // Normal
     int language_idx_ = 0;
+    int script_idx_ = 0;  // Latin
 
     // How far the content is scrolled, and how tall it measured last frame.
     // The second is what the clamp needs and can only be known after a

@@ -37,6 +37,7 @@ constexpr int kIdFont = 4;
 constexpr int kIdTheme = 5;
 constexpr int kIdLanguage = 6;
 constexpr int kIdZoom = 7;
+constexpr int kIdScript = 8;
 
 // The clinical names, each with the plain meaning after it: the operator
 // who knows their diagnosis finds it by name, and the operator who does
@@ -100,6 +101,14 @@ int index_of_zoom(int percent) {
 
 const std::vector<std::string>& language_options() {
     static const std::vector<std::string> v{"English"};
+    return v;
+}
+
+// The five the roadmap asks for, listed whole rather than trimmed to the
+// one that works, so the row says what is coming as well as what is here.
+// Latin is first and is the default.
+const std::vector<std::string>& script_options() {
+    static const std::vector<std::string> v{"Latin", "Greek", "Cyrillic", "Hebrew", "Hangul"};
     return v;
 }
 
@@ -542,16 +551,30 @@ float SettingsPanel::draw_audio(float x, float y) {
 }
 
 float SettingsPanel::draw_interface(const GuiInput& in, float x, float y) {
-    if (!shown("Interface language")) return y;
+    if (!shown("Interface language") && !shown("INOP script")) return y;
     y = heading(x, y + kSectionGap, "Interface");
 
-    row_label(x, y, "Interface language", true);
-    dropdown(control_rect(x, y), language_options(), language_idx_, kIdLanguage, open_dropdown_id_,
-             in, false);
-    row_note(x, y, "locked to English until there are translations");
-    y += kRowH;
+    if (shown("Interface language")) {
+        row_label(x, y, "Interface language", true);
+        dropdown(control_rect(x, y), language_options(), language_idx_, kIdLanguage,
+                 open_dropdown_id_, in, false);
+        row_note(x, y, "locked to English until there are translations");
+        y += kRowH + kRowGap;
+    }
 
-    return y;
+    if (shown("INOP script")) {
+        // Locked on the font and not on the cipher. The baked atlas holds
+        // ASCII 32 to 127 and nothing else, so four of these five would
+        // draw as a row of blank holes rather than as letters. The row is
+        // here, and stays inert, until the atlas can carry them.
+        row_label(x, y, "INOP script", true);
+        dropdown(control_rect(x, y), script_options(), script_idx_, kIdScript, open_dropdown_id_,
+                 in, false);
+        row_note(x, y, "the font can only draw latin so far");
+        y += kRowH + kRowGap;
+    }
+
+    return y - kRowGap;
 }
 
 }  // namespace gui
