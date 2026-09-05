@@ -60,7 +60,6 @@ roadmap from the word file
 INOP braindump
 
 user login and account setup – circular image button top right (may be merged with settings, experimental)
-animations – button dip, button highlight, swipe motion changing between panels, dropdown list goes behind the cover (currently top part overlays the cover) + animated to roll out instead of snap to full length), /not a finished list/
 audio effects – on button click, background music, inop in progress, text to speech
 on button hover, small pop up for what the user is looking at if ambiguous
 tutorial on first launch (maybe) with focus mode (available clciks/enter only on intended parts of screen until tutorial ends), option to replay tutorial in the settings, option to skip tutorial on first launch
@@ -68,7 +67,6 @@ because the inop is so fast at encrypting and decrypting and I want animations t
 language overhaul -> instead of per language tables we have a simple list which will transform every character into parsable input for INOP and enigma (enigma experimental, inop focused)
 0 capitalize the character, 1 apply macron, 2 apply rising ´, 3 apply falling rising, 31 apply bevel (smooth falling rising), 4 apply falling, … (ask specific table during planning). Appended to the end of message between actual end of message and marker
 search bar
-console window hidden on gui launch
 
 settings
 keybind list 

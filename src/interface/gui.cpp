@@ -366,7 +366,7 @@ GuiExit run_gui_settings(const std::string& script_path) {
         float dir_y = 0.0f;
     };
     Transition transition;
-    const float kSwipeSeconds = 0.18f;
+    const float kSwipeSeconds = 0.2f;
 
     auto go_to = [&](Screen next, float dir_x, float dir_y) {
         if (next == screen) return;

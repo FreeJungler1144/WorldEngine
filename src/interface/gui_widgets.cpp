@@ -17,12 +17,27 @@ namespace {
 const void* g_focus = nullptr;       // identity of the std::string* being edited
 bool g_click_consumed_this_frame = false;
 
+// Everything needed to draw the closed face of a dropdown: the box, the
+// selected text and the little arrow. Kept rather than drawn once, because
+// an open list rolls out from behind its own button, which means the
+// button has to be drawn again on top of the list after the list is drawn.
+struct DropdownFace {
+    Rect box{0, 0, 0, 0};
+    Color bg{0, 0, 0, 0};
+    Color border{0, 0, 0, 0};
+    std::string shown;
+    bool dim = false;
+    bool open = false;
+    bool ring = false;
+};
+
 struct PendingDropdown {
     bool active = false;
     int id = -1;
     Rect box;
     const std::vector<std::string>* options = nullptr;
     int* selected = nullptr;
+    DropdownFace face;
 };
 PendingDropdown g_pending;
 
@@ -33,6 +48,16 @@ PendingDropdown g_pending;
 // shared offset (rather than one per dropdown id) is enough.
 float g_popup_scroll = 0.0f;
 int g_popup_scroll_owner = -1;
+
+// How long the open list has been rolling out, in seconds. A list grows
+// downward from behind its own button instead of appearing at full length,
+// so this drives its height and the button is drawn over the top of it.
+// Reset whenever a different dropdown becomes the open one.
+float g_popup_open_t = 0.0f;
+
+// Quicker than a screen change, because the list is a small thing moving a
+// short way and the pointer is usually already on its way to a row.
+constexpr float kPopupRollSeconds = 0.12f;
 
 // Where the open dropdown popup was drawn on the previous frame, and
 // whether there was one. A popup is drawn last so it sits on top, but
@@ -735,6 +760,18 @@ bool numeric_field(const Rect& r, std::string& value, const GuiInput& in, size_t
                        CaseFold::None, /*placeholder=*/"", center_text);
 }
 
+namespace {
+
+void draw_dropdown_face(const DropdownFace& f) {
+    draw_rect(f.box.x, f.box.y, f.box.w, f.box.h, f.bg);
+    draw_rect_outline(f.box.x, f.box.y, f.box.w, f.box.h, f.border);
+    if (f.ring) draw_focus_ring(f.box);
+    label(Rect{f.box.x + PAD, f.box.y, f.box.w - 2 * PAD - 14, f.box.h}, f.shown, f.dim);
+    label(Rect{f.box.x + f.box.w - 16, f.box.y, 14, f.box.h}, f.open ? "^" : "v", f.dim);
+}
+
+}  // namespace
+
 bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
               int& open_dropdown_id, const GuiInput& in, bool enabled, bool invalid) {
     bool changed = false;
@@ -750,17 +787,24 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
         bg = hover_lift(bg, m.hover);
         bg = press_sink(bg, m.press);
     }
-    draw_rect(d.x, d.y, d.w, d.h, bg);
     // An open list already owns the accent border, so the hover ring has
     // nothing to add there and would only make the two states look alike.
     Color border_color = invalid ? palette::border_invalid()
                                  : (is_open ? palette::accent() : hover_border(m.hover));
-    draw_rect_outline(d.x, d.y, d.w, d.h, border_color);
-    if (kb) draw_focus_ring(d);
-    std::string shown =
-        (selected >= 0 && selected < static_cast<int>(options.size())) ? options[static_cast<size_t>(selected)] : "";
-    label(Rect{d.x + PAD, d.y, d.w - 2 * PAD - 14, d.h}, shown, !enabled);
-    label(Rect{d.x + d.w - 16, d.y, 14, d.h}, is_open ? "^" : "v", !enabled);
+    DropdownFace face;
+    face.box = d;
+    face.bg = bg;
+    face.border = border_color;
+    face.shown = (selected >= 0 && selected < static_cast<int>(options.size()))
+                     ? options[static_cast<size_t>(selected)]
+                     : "";
+    face.dim = !enabled;
+    face.open = is_open;
+    face.ring = kb;
+    // Drawn here as well as again over the open list. Drawing it twice
+    // costs one box and two labels and means the face can never be missing
+    // for a frame, however a screen manages to change while a list is up.
+    draw_dropdown_face(face);
 
     if (enabled && rect_contains(r, in.mouse_x, in.mouse_y) && in.mouse_pressed &&
         !click_over_open_popup(in)) {
@@ -781,6 +825,7 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
         g_pending.box = r;
         g_pending.options = &options;
         g_pending.selected = &selected;
+        g_pending.face = face;
     }
     return changed;
 }
@@ -792,17 +837,32 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
     if (g_pending.id != g_popup_scroll_owner) {
         g_popup_scroll = 0.0f;
         g_popup_scroll_owner = g_pending.id;
+        g_popup_open_t = 0.0f;
     }
 
     const auto& options = *g_pending.options;
     const float row_h = g_pending.box.h;
     const float max_visible = 8.0f;
-    float list_h = row_h * std::min<float>(static_cast<float>(options.size()), max_visible);
+    const float full_h = row_h * std::min<float>(static_cast<float>(options.size()), max_visible);
+
+    // The list rolls out from behind its own button rather than appearing
+    // at full length. Easing out rather than in: it leaves at once and
+    // settles, which is what a thing being pulled out from somewhere does.
+    g_popup_open_t += frame_dt();
+    float roll = 1.0f;
+    if (motion_enabled()) {
+        roll = std::clamp(g_popup_open_t / kPopupRollSeconds, 0.0f, 1.0f);
+        roll = 1.0f - (1.0f - roll) * (1.0f - roll);
+    }
+    const float list_h = full_h * roll;
+
+    // The visible height is also the clickable one, so a row that has not
+    // been rolled out to yet cannot be picked.
     Rect popup{g_pending.box.x, g_pending.box.y + g_pending.box.h, g_pending.box.w, list_h};
     g_popup_rect_last = popup;
     g_popup_drawn_this_frame = true;
 
-    float max_scroll = std::max(0.0f, static_cast<float>(options.size()) * row_h - list_h);
+    float max_scroll = std::max(0.0f, static_cast<float>(options.size()) * row_h - full_h);
     g_popup_scroll -= static_cast<float>(in.scroll_y) * row_h;
     if (g_popup_scroll < 0.0f) g_popup_scroll = 0.0f;
     if (g_popup_scroll > max_scroll) g_popup_scroll = max_scroll;
@@ -826,7 +886,7 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
         // entry walks the selection somewhere nobody can see.
         const float sel_y = row_h * static_cast<float>(*g_pending.selected);
         if (sel_y < g_popup_scroll) g_popup_scroll = sel_y;
-        if (sel_y + row_h > g_popup_scroll + list_h) g_popup_scroll = sel_y + row_h - list_h;
+        if (sel_y + row_h > g_popup_scroll + full_h) g_popup_scroll = sel_y + row_h - full_h;
         if (g_popup_scroll < 0.0f) g_popup_scroll = 0.0f;
         if (g_popup_scroll > max_scroll) g_popup_scroll = max_scroll;
     }
@@ -864,13 +924,18 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
     }
     end_scissor();
 
-    if (max_scroll > 0.0f) {
+    if (max_scroll > 0.0f && popup.h > 0.0f) {
         // A minimal scrollbar thumb on the right edge — enough to signal
         // "there's more below" without a full scrollbar widget.
-        float thumb_h = std::max(12.0f, popup.h * (list_h / (static_cast<float>(options.size()) * row_h)));
+        float thumb_h = std::max(12.0f, popup.h * (full_h / (static_cast<float>(options.size()) * row_h)));
         float thumb_y = popup.y + (popup.h - thumb_h) * (g_popup_scroll / max_scroll);
         draw_rect(popup.x + popup.w - 4, thumb_y, 3, thumb_h, palette::accent());
     }
+
+    // The button goes back on top of its own list, which is the whole of
+    // what makes the list read as coming out from behind it rather than
+    // over it.
+    draw_dropdown_face(g_pending.face);
 
     if (in.mouse_pressed && !clicked_inside && !rect_contains(g_pending.box, in.mouse_x, in.mouse_y)) {
         // Click landed outside the box and outside the popup — close it.
