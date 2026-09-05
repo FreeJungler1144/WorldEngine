@@ -7,6 +7,7 @@
 // entirely by CMakeLists.txt's source list — main.cpp needs no #ifdef.
 #pragma once
 
+#include <functional>
 #include <string>
 
 namespace inop {
@@ -37,5 +38,17 @@ bool gui_available();
 // (gui_enciphering_panel.hpp). Maintenance (gui_maintenance_panel.hpp) and
 // Settings (gui_settings_panel.hpp) are both real screens now.
 GuiExit run_gui_settings(const std::string& script_path = "");
+
+// How one self-test check reports itself: whether it passed, and what it
+// was. main.cpp owns the printing and the failure count, so the GUI half
+// of the list reads exactly like the rest of it.
+using SelfTestCheck = std::function<void(bool, const std::string&)>;
+
+// The parts of the GUI that need no window at all: the preferences file,
+// the script parser and the saved configuration store. Which .cpp defines
+// this is the same source list choice that decides run_gui_settings(), so
+// a CLI-only build links a version that checks nothing rather than failing
+// to find the symbol.
+void gui_self_test(const SelfTestCheck& check);
 
 }  // namespace inop

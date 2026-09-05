@@ -97,6 +97,7 @@ if(INOP_WITH_GUI)
     src/interface/gui_prefs.cpp
     src/interface/gui_settings_panel.cpp
     src/interface/gui_maintenance_panel.cpp
+    src/interface/gui_self_test.cpp
   )
 else()
   set(INOP_GUI_SOURCES src/interface/gui_stub.cpp)

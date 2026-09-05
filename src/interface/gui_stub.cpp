@@ -19,4 +19,11 @@ GuiExit run_gui_settings(const std::string& /*script_path*/) {
     return GuiExit::Terminal;
 }
 
+void gui_self_test(const SelfTestCheck&) {
+    // Nothing to report. None of the files those checks cover are compiled
+    // into a build without the GUI, so there is nothing here that could
+    // pass or fail. Silent rather than a skip line: a CLI-only build is
+    // not a build with something missing from it.
+}
+
 }  // namespace inop

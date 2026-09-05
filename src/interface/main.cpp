@@ -1167,6 +1167,132 @@ int self_test() {
                               : "KEY MATERIAL IS TRACKED BY GIT: " + tracked.front());
     }
 
+    // 13. The interface layer. Everything above this point is the logic
+    //     layer, which was the whole of the suite until now. These are the
+    //     pieces sitting between that logic and a terminal or a window,
+    //     and they were covered by nothing.
+    {
+        // Batch splitting. A message may span lines; a blank line, or a
+        // line holding nothing but spaces, is what ends one.
+        check(split_batch_messages("").empty(), "empty batch input gives no messages");
+
+        std::vector<std::string> two = split_batch_messages("first\n\nsecond\n");
+        check(two.size() == 2 && two[0] == "first" && two[1] == "second",
+              "a blank line separates two batch messages");
+
+        std::vector<std::string> joined = split_batch_messages("line one\nline two\n\nnext\n");
+        check(joined.size() == 2 && joined[0] == "line one line two" && joined[1] == "next",
+              "a batch message spanning lines is joined with a space");
+
+        std::vector<std::string> padded = split_batch_messages("\n\n\nonly\n\n\n");
+        check(padded.size() == 1 && padded[0] == "only",
+              "blank runs at either end produce no empty batch messages");
+
+        std::vector<std::string> spaced = split_batch_messages("one\n   \ntwo\n");
+        check(spaced.size() == 2, "a line of nothing but spaces ends a batch message");
+    }
+    {
+        const std::string path = "inop_selftest_batch.txt";
+        { std::ofstream f(path, std::ios::binary); f << "one\n\ntwo\n"; }
+        std::string raw, err;
+        const bool ok = read_batch_file(path, raw, &err);
+        std::remove(path.c_str());
+        check(ok && raw == "one\n\ntwo\n", "a batch file reads back whole");
+
+        std::string gone, gone_err;
+        check(!read_batch_file("inop_selftest_no_batch.txt", gone, &gone_err) && !gone_err.empty(),
+              "a batch file that is not there is refused, with a reason");
+    }
+    {
+        // The cap is answered from the file size before a byte is read, so
+        // an oversized file can never be half processed.
+        const std::string path = "inop_selftest_big.txt";
+        {
+            std::ofstream f(path, std::ios::binary);
+            f << std::string(MAX_BATCH_FILE_BYTES + 1, 'a');
+        }
+        std::string raw, err;
+        const bool ok = read_batch_file(path, raw, &err);
+        std::remove(path.c_str());
+        check(!ok && !err.empty() && raw.empty(),
+              "a batch file over the floppy cap is refused before it is read");
+    }
+    {
+        // A settings file has to come back as what went into it. Generated
+        // rather than hand written, so this covers whatever a real
+        // configuration carries rather than whatever was easy to type.
+        const Suite& s38 = suite("38");
+        GeneratedSettings g = random_settings(s38, 5, 3, 1);
+        Settings wrote;
+        wrote.suite_code = g.suite_code;
+        wrote.rotors = g.rotors;
+        wrote.reflector = g.reflector;
+        wrote.rings = g.rings;
+        wrote.notches = g.notches;
+        wrote.plugs = g.plugs;
+        wrote.master_key = g.master_key;
+
+        const std::string path = "inop_selftest_settings.json";
+        const bool saved = save_settings(wrote, path);
+        Settings read;
+        std::string err;
+        const bool loaded = load_settings(read, path, &err);
+        std::remove(path.c_str());
+        check(saved && loaded && read.suite_code == wrote.suite_code &&
+                  read.rotors == wrote.rotors && read.reflector == wrote.reflector &&
+                  read.rings == wrote.rings && read.notches == wrote.notches &&
+                  read.plugs == wrote.plugs && read.master_key == wrote.master_key,
+              "a settings file survives a save and a load unchanged");
+    }
+    {
+        // Key sheet indexing. Entry n has to be entry n, and an index past
+        // the end has to be refused rather than clamped to the last one.
+        const std::string path = "inop_selftest_sheet.json";
+        const Suite& s38 = suite("38");
+        std::string first, err;
+        const bool wrote = write_key_sheet(path, s38, 3, 2, 1, false, 5, &first, &err);
+        const int n = count_keysheet_entries(path);
+
+        Settings one, three, past;
+        std::string e1, e3, ep;
+        const bool got1 = load_keysheet_entry(path, 1, one, &e1);
+        const bool got3 = load_keysheet_entry(path, 3, three, &e3);
+        const bool got_past = load_keysheet_entry(path, 4, past, &ep);
+        std::remove(path.c_str());
+
+        check(wrote && n == 3, "a written key sheet counts its own entries");
+        check(got1 && got3 && one.master_key != three.master_key,
+              "key sheet entry one and entry three are different entries");
+        check(!got_past && !ep.empty(), "a key sheet index past the end is refused");
+    }
+    {
+        // The 2.2.x plain text settings file has to survive the move to
+        // JSON. An operator upgrading has one on disk and nothing else.
+        const std::string txt = "inop_selftest_old.settings";
+        const std::string json = "inop_selftest_new.json";
+        const Suite& s38 = suite("38");
+        GeneratedSettings g = random_settings(s38, 5, 2, 1);
+        {
+            std::ofstream f(txt, std::ios::binary);
+            f << settings_to_text(g);
+        }
+
+        const bool migrated = migrate_settings_from_text(txt, json);
+        Settings read;
+        std::string err;
+        const bool loaded = migrated && load_settings(read, json, &err);
+        std::remove(txt.c_str());
+        std::remove(json.c_str());
+        check(migrated && loaded && read.master_key == g.master_key &&
+                  read.rotors == g.rotors && read.reflector == g.reflector,
+              "an old plain text settings file migrates to JSON intact");
+    }
+
+    // 14. Whatever the GUI can be asked without opening a window. Silent
+    //     in a build with no GUI compiled into it, because none of the
+    //     files those checks cover are there to pass or fail.
+    gui_self_test(check);
+
     rule();
     if (failures == 0) std::cout << GREEN << "all checks passed" << RST << "\n";
     else std::cout << RED << failures << " check(s) failed" << RST << "\n";
