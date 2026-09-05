@@ -206,6 +206,19 @@ private:
     // the field itself used to be (state_.master_key_prefilled).
     std::string master_key_placeholder_;
 
+    // The Legacy notch letter is a property of the chosen rotor and the
+    // suite alphabet, and neither changes except when the operator picks
+    // something. make_rotor() sorts two strings and bakes two 26 by 26
+    // tables, so working it out per row per frame was three full rotor
+    // bakes at 60 Hz for a letter that almost never moves. Keyed on what
+    // it was built from, so a stale entry cannot survive a change.
+    struct NotchMemo {
+        std::string suite_code;
+        std::string rotor_name;
+        std::string display;
+    };
+    NotchMemo notch_memo_[kMaxRotors];
+
     PanelState state_;
     PanelUiState ui_;
     FieldValidity validity_;

@@ -155,12 +155,11 @@ bool numeric_field(const Rect& r, std::string& value, const GuiInput& in, size_t
 // Dropdown. `id` must be a small stable integer unique within one panel
 // frame (e.g. a row index) — `open_dropdown_id` is shared panel-wide
 // state, so only one dropdown is ever open at a time, and it is always the
-// one drawn last (topmost), regardless of layout order. NOTE: a picked
-// item does not surface through the return value of this function — it
-// writes into `selected` later, from draw_open_dropdown_popup(), since the
-// popup draws after every dropdown() call in the frame. The return value
-// here is always false; callers should not rely on it.
-bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
+// one drawn last (topmost), regardless of layout order. A picked item does
+// not surface from here at all — it writes into `selected` later, from
+// draw_open_dropdown_popup(), since the popup draws after every dropdown()
+// call in the frame. That is why there is nothing to return.
+void dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
               int& open_dropdown_id, const GuiInput& in, bool enabled, bool invalid = false);
 
 // Whether a dropdown list is open on screen. gui.cpp asks so that Escape

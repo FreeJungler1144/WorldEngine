@@ -82,6 +82,12 @@ enum class Font { Body, Wordmark, BodyLarge };
 // known-good face to fall back to) must re-call with one that works.
 bool load_fonts(const std::string& font_file = "cour.ttf");
 
+// Counts how many times an atlas has been baked. Anything that caches a
+// measurement taken from the atlas has to notice a re-bake, because the
+// same string is a different width in a different typeface. Starts at 1,
+// so a cache that begins at 0 always misses on its first look.
+unsigned font_generation();
+
 float text_width(Font font, const std::string& text);
 float text_line_height(Font font);
 void draw_text(Font font, float x, float baseline_y, const std::string& text, Color c);

@@ -112,7 +112,4 @@ int migrate_wheels_from_text(const std::string& txt_path, const std::string& rot
 std::vector<std::string> available_rotors(const Suite& s);
 std::vector<std::string> available_reflectors(const Suite& s);
 
-bool rotor_exists(const std::string& name, const Suite& s);
-bool reflector_exists(const std::string& name, const Suite& s);
-
 }  // namespace inop

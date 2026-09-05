@@ -545,7 +545,7 @@ namespace {
 
 // Widths add up exactly here: the baked atlas has no kerning, so one
 // measurement per character is enough to know where a line ends.
-std::vector<std::string> wrap_lines(float box_w, const std::string& text) {
+std::vector<std::string> wrap_lines_uncached(float box_w, const std::string& text) {
     const float avail = std::max(0.0f, box_w - 2 * PAD);
     std::vector<std::string> lines;
     std::string cur;
@@ -587,6 +587,47 @@ std::vector<std::string> wrap_lines(float box_w, const std::string& text) {
     return lines;
 }
 
+// Sizing a growable box wraps its text and keeps only the line count, then
+// drawing the same box a moment later wraps the identical text again. At
+// the 4096 character cap one wrap is roughly 4096 single character
+// text_width calls plus seventy line allocations, so the repeat was the
+// largest piece of wasted work in a frame. The enciphering screen sizes
+// all three of its boxes before it draws any of them, so the ring has to
+// hold more than the three in flight.
+//
+// The atlas decides how wide a character is, so a re-bake makes every
+// entry here wrong. font_generation() is what catches that: changing the
+// typeface empties the ring instead of serving widths from the old face.
+struct WrapEntry {
+    bool used = false;
+    float box_w = 0.0f;
+    std::string text;
+    std::vector<std::string> lines;
+};
+
+const std::vector<std::string>& wrap_lines(float box_w, const std::string& text) {
+    constexpr size_t kRing = 8;
+    static WrapEntry ring[kRing];
+    static size_t next = 0;
+    static unsigned baked = 0;
+
+    if (baked != font_generation()) {
+        baked = font_generation();
+        for (WrapEntry& e : ring) e = WrapEntry{};
+        next = 0;
+    }
+    for (const WrapEntry& e : ring)
+        if (e.used && e.box_w == box_w && e.text == text) return e.lines;
+
+    WrapEntry& slot = ring[next];
+    next = (next + 1) % kRing;
+    slot.used = true;
+    slot.box_w = box_w;
+    slot.text = text;
+    slot.lines = wrap_lines_uncached(box_w, text);
+    return slot.lines;
+}
+
 float block_line_height() { return text_line_height(Font::Body) * 1.3f; }
 
 }  // namespace
@@ -605,7 +646,7 @@ int text_block(const Rect& r, const std::string& text, const GuiInput& in, float
     draw_rect(r.x, r.y, r.w, r.h, palette::panel());
     draw_rect_outline(r.x, r.y, r.w, r.h, palette::border());
 
-    std::vector<std::string> lines = wrap_lines(r.w, text);
+    const std::vector<std::string>& lines = wrap_lines(r.w, text);
     const float lh = block_line_height();
     const float content_h = static_cast<float>(lines.size()) * lh;
 
@@ -772,9 +813,8 @@ void draw_dropdown_face(const DropdownFace& f) {
 
 }  // namespace
 
-bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
+void dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
               int& open_dropdown_id, const GuiInput& in, bool enabled, bool invalid) {
-    bool changed = false;
     bool is_open = enabled && open_dropdown_id == id;
 
     WidgetMotion m = enabled ? widget_motion(r, in) : WidgetMotion{};
@@ -827,7 +867,6 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
         g_pending.selected = &selected;
         g_pending.face = face;
     }
-    return changed;
 }
 
 bool dropdown_popup_open() { return g_popup_drawn_this_frame; }

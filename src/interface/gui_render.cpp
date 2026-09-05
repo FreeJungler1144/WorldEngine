@@ -47,6 +47,11 @@ FontAtlas g_body;
 FontAtlas g_wordmark;
 FontAtlas g_body_large;
 
+// Bumped by every successful bake, never reset. Read by anything that
+// caches a width taken from the atlas, so a typeface change throws that
+// cache away instead of drawing with measurements from the old face.
+unsigned g_font_generation = 0;
+
 bool read_file(const std::string& path, std::vector<unsigned char>& out) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
@@ -240,8 +245,11 @@ bool load_fonts(const std::string& font_file) {
         free_atlases();
         return false;
     }
+    ++g_font_generation;
     return true;
 }
+
+unsigned font_generation() { return g_font_generation; }
 
 float text_width(Font font, const std::string& text) {
     const FontAtlas& a = atlas_for(font);

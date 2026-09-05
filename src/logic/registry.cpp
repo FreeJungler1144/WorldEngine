@@ -450,13 +450,4 @@ std::vector<std::string> collect(const Suite& s, bool rotors) {
 std::vector<std::string> available_rotors(const Suite& s)     { return collect(s, true); }
 std::vector<std::string> available_reflectors(const Suite& s) { return collect(s, false); }
 
-bool rotor_exists(const std::string& name, const Suite& s) {
-    std::vector<std::string> v = available_rotors(s);
-    return std::find(v.begin(), v.end(), name) != v.end();
-}
-bool reflector_exists(const std::string& name, const Suite& s) {
-    std::vector<std::string> v = available_reflectors(s);
-    return std::find(v.begin(), v.end(), name) != v.end();
-}
-
 }  // namespace inop

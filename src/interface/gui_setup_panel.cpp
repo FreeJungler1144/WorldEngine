@@ -583,6 +583,14 @@ void SetupPanel::draw_rotor_grid(const GuiInput& in, Rect area) {
     float grid_top = area.y + header_h;
     float row_h = (area.h - header_h) / static_cast<float>(visible_rows);
 
+    // One alphabet for the whole grid rather than one per row. su does not
+    // change inside the loop, and every Alphabet allocates a 256 entry
+    // table plus a copy of the alphabet string, so ten of the fifteen
+    // built per frame came from this one loop.
+    const Alphabet row_alpha(su.alphabet);
+    const CaseFold notch_fold =
+        row_alpha.uses_uppercase() ? CaseFold::ToUpper : CaseFold::ToLower;
+
     for (int i = 0; i < visible_rows; ++i) {
         bool active = i < state_.rotor_count;
         float ry = grid_top + i * row_h;
@@ -603,18 +611,24 @@ void SetupPanel::draw_rotor_grid(const GuiInput& in, Rect area) {
             // still benefits from seeing which letter theirs steps on.
             std::string display = "-";
             if (active && !state_.rotor_rows[i].rotor_name.empty()) {
-                Alphabet alpha(su.alphabet);
-                std::string ns = make_rotor(state_.rotor_rows[i].rotor_name, alpha).notch_str(alpha);
-                if (!ns.empty()) display = ns;
+                NotchMemo& memo = notch_memo_[i];
+                if (memo.suite_code != state_.suite_code ||
+                    memo.rotor_name != state_.rotor_rows[i].rotor_name) {
+                    const std::string ns =
+                        make_rotor(state_.rotor_rows[i].rotor_name, row_alpha).notch_str(row_alpha);
+                    memo.suite_code = state_.suite_code;
+                    memo.rotor_name = state_.rotor_rows[i].rotor_name;
+                    memo.display = ns.empty() ? "-" : ns;
+                }
+                display = memo.display;
             }
             label(Rect{notch_r.x + 6, notch_r.y, notch_r.w - 12, notch_r.h}, display, true);
         } else {
             bool row_invalid = active && !validity_.notch_ok[i];
-            CaseFold fold = Alphabet(su.alphabet).uses_uppercase() ? CaseFold::ToUpper : CaseFold::ToLower;
             for (int b = 0; b < kNotchBoxes; ++b) {
                 Rect box_r{notch_x + b * (notch_box_w + notch_gap), ry, notch_box_w, row_h - 4};
                 text_field(box_r, state_.rotor_rows[i].notch_box[b], in, su.alphabet, 1, active,
-                           row_invalid, fold, /*placeholder=*/"", /*center_text=*/true);
+                           row_invalid, notch_fold, /*placeholder=*/"", /*center_text=*/true);
             }
         }
     }
