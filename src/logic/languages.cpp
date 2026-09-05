@@ -1,5 +1,6 @@
 #include "languages.hpp"
 
+#include <array>
 #include <cctype>
 #include <map>
 #include <utility>
@@ -154,24 +155,46 @@ const std::vector<FoldEntry>& single_fold_table() {
     return v;
 }
 
+// Which byte values can begin an entry in either fold table. Built from
+// the tables themselves rather than assumed, so adding an entry of any
+// kind, ASCII included, stays correct without touching this. Every entry
+// today is multi-byte UTF-8, so in practice this rules out the whole
+// ASCII range, which is most of every message.
+const std::array<bool, 256>& fold_lead_bytes() {
+    static const std::array<bool, 256> v = [] {
+        std::array<bool, 256> t{};
+        for (const auto& e : multi_fold_table()) t[static_cast<unsigned char>(e.src[0])] = true;
+        for (const auto& e : single_fold_table()) t[static_cast<unsigned char>(e.src[0])] = true;
+        return t;
+    }();
+    return v;
+}
+
 std::string apply_fold_table(const std::string& s) {
     const auto& multi = multi_fold_table();
     const auto& single = single_fold_table();
+    const auto& lead = fold_lead_bytes();
     std::string out;
     out.reserve(s.size());
     size_t i = 0;
     while (i < s.size()) {
         bool matched = false;
-        for (const auto& e : multi) {
-            size_t n = std::char_traits<char>::length(e.src);
-            if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
+        // Both tables are scanned linearly, so skipping a byte that cannot
+        // start any entry skips the entire scan. Without this the function
+        // walked 200 entries per input byte and ran two orders of magnitude
+        // slower than the cipher it feeds.
+        if (lead[static_cast<unsigned char>(s[i])]) {
+            for (const auto& e : multi) {
+                size_t n = std::char_traits<char>::length(e.src);
+                if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
+            }
+            if (matched) continue;
+            for (const auto& e : single) {
+                size_t n = std::char_traits<char>::length(e.src);
+                if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
+            }
+            if (matched) continue;
         }
-        if (matched) continue;
-        for (const auto& e : single) {
-            size_t n = std::char_traits<char>::length(e.src);
-            if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
-        }
-        if (matched) continue;
         unsigned char c = static_cast<unsigned char>(s[i]);
         // Punctuation and anything unrecognised is dropped here, same as
         // preprocess() would drop it later — the worked-examples "encoded"

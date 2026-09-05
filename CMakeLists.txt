@@ -102,14 +102,21 @@ else()
   set(INOP_GUI_SOURCES src/interface/gui_stub.cpp)
 endif()
 
+# The core sources are identical in all four executables, and passing the
+# same list to four add_executable() calls compiled every one of them four
+# times. registry.cpp, settings.cpp and generator.cpp each pull in
+# nlohmann/json.hpp, which is most of the cost, so the three redundant
+# copies were close to half of a clean build. Compiled once here instead.
+# All four targets already used byte-identical flags, so nothing about the
+# resulting objects changes.
+add_library(inop_core OBJECT ${INOP_CORE_SOURCES})
+
 add_executable(inop
-  ${INOP_CORE_SOURCES}
   ${INOP_GUI_SOURCES}
   src/interface/main.cpp
 )
 
 add_executable(inop_benchmark
-  ${INOP_CORE_SOURCES}
   src/benchmark-debug/benchmark_main.cpp
 )
 
@@ -117,7 +124,6 @@ add_executable(inop_benchmark
 # grammar for offline analysis of the diacritic scheme. Same standing as
 # inop_benchmark: headless, offline, never linked into the live pipeline.
 add_executable(inop_langprobe
-  ${INOP_CORE_SOURCES}
   src/benchmark-debug/langprobe_main.cpp
 )
 
@@ -125,11 +131,14 @@ add_executable(inop_langprobe
 # offline, headless, manufactures its own key material and never reads or
 # writes any, and is never linked into the live message pipeline.
 add_executable(inop_bombe
-  ${INOP_CORE_SOURCES}
   src/bombe/bombe_main.cpp
 )
 
 foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
+  target_link_libraries(${tgt} PRIVATE inop_core)
+endforeach()
+
+foreach(tgt inop inop_benchmark inop_langprobe inop_bombe inop_core)
   target_include_directories(${tgt} PRIVATE ${INOP_SRC_DIRS})
   target_link_libraries(${tgt} PRIVATE nlohmann_json::nlohmann_json)
 
@@ -140,20 +149,22 @@ foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
     endif()
   else()
     target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+      # -Wdangling-reference fires on every `const Suite& s = suite("38")`
+      # in the tree. suite() returns a reference into a function-local
+      # static map and keeps nothing, so none of them dangle; the GCC 13
+      # heuristic looks at the call expression, sees a temporary argument,
+      # and warns anyway. Each call site could be rewritten to bind
+      # the literal to a named local first, which would silence a compiler
+      # heuristic by making the code worse. Turned off here instead.
+      #
+      # Outside the INOP_WERROR block on purpose. It used to sit inside it,
+      # which meant CI got the quiet build and every ordinary build got
+      # fourteen false warnings, hiding the one real warning among them.
+      target_compile_options(${tgt} PRIVATE -Wno-dangling-reference)
+    endif()
     if(INOP_WERROR)
       target_compile_options(${tgt} PRIVATE -Werror)
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
-        # -Wdangling-reference fires on every `const Suite& s = suite("38")`
-        # in the tree. suite() returns a reference into a function-local
-        # static map and keeps nothing, so none of them dangle; the GCC 13
-        # heuristic looks at the call expression, sees a temporary argument,
-        # and warns anyway. Each call site could be rewritten to bind
-        # the literal to a named local first, which would silence a compiler
-        # heuristic by making the code worse. Turned off here instead, and
-        # only where -Werror would otherwise turn a false positive into a
-        # build failure.
-        target_compile_options(${tgt} PRIVATE -Wno-dangling-reference)
-      endif()
     endif()
   endif()
 
@@ -190,7 +201,7 @@ add_custom_target(inop_source_rules ALL
   COMMENT "Checking INOP source rules (core purity, RNG purity)"
   VERBATIM
 )
-foreach(tgt inop inop_benchmark inop_langprobe inop_bombe)
+foreach(tgt inop inop_benchmark inop_langprobe inop_bombe inop_core)
   add_dependencies(${tgt} inop_source_rules)
 endforeach()
 
