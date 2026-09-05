@@ -45,7 +45,6 @@ namespace {
 
 // ── global encode table ────────────────────────────────────────────────
 // Every source form (upper and lower) folds to the same lowercase output.
-// Longer sequences are matched before shorter ones by trying `multi` first.
 //
 // Digit assignments (a repeated digit chains a second mark on the first —
 // see e.g. the Pinyin ü+tone / Hungarian double-acute / dot-above entries
@@ -60,11 +59,6 @@ namespace {
 //                         at most one such letter per language
 //   88 dot-below (its own doubled slot, same convention as 22/33 below)
 struct FoldEntry { const char* src; const char* out; };
-
-const std::vector<FoldEntry>& multi_fold_table() {
-    static const std::vector<FoldEntry> v = {};
-    return v;
-}
 
 const std::vector<FoldEntry>& single_fold_table() {
     static const std::vector<FoldEntry> v = {
@@ -155,15 +149,14 @@ const std::vector<FoldEntry>& single_fold_table() {
     return v;
 }
 
-// Which byte values can begin an entry in either fold table. Built from
-// the tables themselves rather than assumed, so adding an entry of any
-// kind, ASCII included, stays correct without touching this. Every entry
-// today is multi-byte UTF-8, so in practice this rules out the whole
-// ASCII range, which is most of every message.
+// Which byte values can begin an entry in the fold table. Built from the
+// table itself rather than assumed, so adding an entry of any kind, ASCII
+// included, stays correct without touching this. Every entry today is
+// multi-byte UTF-8, so in practice this rules out the whole ASCII range,
+// which is most of every message.
 const std::array<bool, 256>& fold_lead_bytes() {
     static const std::array<bool, 256> v = [] {
         std::array<bool, 256> t{};
-        for (const auto& e : multi_fold_table()) t[static_cast<unsigned char>(e.src[0])] = true;
         for (const auto& e : single_fold_table()) t[static_cast<unsigned char>(e.src[0])] = true;
         return t;
     }();
@@ -171,7 +164,6 @@ const std::array<bool, 256>& fold_lead_bytes() {
 }
 
 std::string apply_fold_table(const std::string& s) {
-    const auto& multi = multi_fold_table();
     const auto& single = single_fold_table();
     const auto& lead = fold_lead_bytes();
     std::string out;
@@ -179,16 +171,11 @@ std::string apply_fold_table(const std::string& s) {
     size_t i = 0;
     while (i < s.size()) {
         bool matched = false;
-        // Both tables are scanned linearly, so skipping a byte that cannot
+        // The table is scanned linearly, so skipping a byte that cannot
         // start any entry skips the entire scan. Without this the function
         // walked 200 entries per input byte and ran two orders of magnitude
         // slower than the cipher it feeds.
         if (lead[static_cast<unsigned char>(s[i])]) {
-            for (const auto& e : multi) {
-                size_t n = std::char_traits<char>::length(e.src);
-                if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
-            }
-            if (matched) continue;
             for (const auto& e : single) {
                 size_t n = std::char_traits<char>::length(e.src);
                 if (s.compare(i, n, e.src) == 0) { out += e.out; i += n; matched = true; break; }
