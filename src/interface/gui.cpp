@@ -291,14 +291,23 @@ GuiExit run_gui_settings(const std::string& script_path) {
     if (!gui::load_fonts(prefs.font_file)) {
         // A stored typeface that has since been uninstalled must not cost
         // the operator the whole application, so the default is tried
-        // before giving up.
+        // before giving up, and Times New Roman after that. Times is the
+        // last resort rather than the default because it is the face a
+        // Windows install is least likely to be without, and a window with
+        // no text at all is the one failure the operator cannot work
+        // around.
         std::cerr << "gui: could not load font '" << prefs.font_file << "' — trying the default\n";
         prefs.font_file = gui::GuiPrefs{}.font_file;
         if (!gui::load_fonts(prefs.font_file)) {
-            std::cerr << "gui: could not load system font (times.ttf) — closing\n";
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return leave_gui(GuiExit::Terminal);
+            std::cerr << "gui: could not load the default font (" << prefs.font_file
+                      << ") — trying times.ttf\n";
+            prefs.font_file = "times.ttf";
+            if (!gui::load_fonts(prefs.font_file)) {
+                std::cerr << "gui: could not load any font — closing\n";
+                glfwDestroyWindow(window);
+                glfwTerminate();
+                return leave_gui(GuiExit::Terminal);
+            }
         }
     }
 

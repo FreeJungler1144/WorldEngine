@@ -52,11 +52,17 @@ struct FontChoice {
     std::string file;  // filename inside the Windows font directory
 };
 
+// Where a font file actually is. The folder bundled with the program is
+// searched first and the system font directory second, so a face shipped
+// with INOP wins over a same-named one installed on the machine. Comes
+// back empty when neither holds it.
+std::string font_path(const std::string& file);
+
 // Every face this build knows how to offer, filtered down to the ones
-// actually present in the system font directory — a machine missing
-// Georgia should not be shown Georgia. Times New Roman is first and is
-// the default; if even that is missing the list comes back empty and the
-// font row has nothing to offer.
+// font_path() can actually find — a machine missing Harlow should not be
+// shown Harlow. Courier New is first and is the default; if even that is
+// missing the list comes back empty and the font row has nothing to
+// offer.
 const std::vector<FontChoice>& available_fonts();
 
 // The preferences that currently do something. Rows the settings screen
@@ -67,7 +73,7 @@ struct GuiPrefs {
     Theme theme = Theme::System;
     ColourblindMode colourblind = ColourblindMode::Full;
     WindowMode window_mode = WindowMode::BorderlessFullscreen;
-    std::string font_file = "times.ttf";
+    std::string font_file = "cour.ttf";
     // Whole-interface scale as a percentage, so the stored value reads the
     // same as the control that sets it. Kept as an int rather than a float
     // because it only ever takes the fixed steps the dropdown offers, and

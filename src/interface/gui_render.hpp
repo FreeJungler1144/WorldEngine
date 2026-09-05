@@ -80,7 +80,7 @@ enum class Font { Body, Wordmark, BodyLarge };
 // leaking a texture per change. A failed re-bake leaves no atlases at
 // all, so callers that can carry on (the settings screen, which has a
 // known-good face to fall back to) must re-call with one that works.
-bool load_fonts(const std::string& font_file = "times.ttf");
+bool load_fonts(const std::string& font_file = "cour.ttf");
 
 float text_width(Font font, const std::string& text);
 float text_line_height(Font font);

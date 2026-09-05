@@ -9,7 +9,9 @@
 // system theme is set. Nothing else in this file touches the platform.
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 
@@ -82,17 +84,32 @@ WindowMode window_mode_from(const std::string& s) {
     return WindowMode::Windowed;
 }
 
-std::string fonts_dir() {
+std::string system_fonts_dir() {
     const char* windir = std::getenv("WINDIR");
     return windir ? std::string(windir) + "\\Fonts\\" : std::string("C:\\Windows\\Fonts\\");
 }
 
-bool font_present(const std::string& file) {
-    std::ifstream f(fonts_dir() + file, std::ios::binary);
+// The faces that travel with the program rather than with the operating
+// system, because Crimson Pro and SGA are on no machine by default. The
+// path is relative, so it resolves against the working directory — the
+// same rule kPrefsPath already follows, and the same limitation with it:
+// launched from elsewhere, neither one is found.
+const char* const kBundledFontsDir = "fonts/";
+
+bool readable(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
     return static_cast<bool>(f);
 }
 
 }  // namespace
+
+std::string font_path(const std::string& file) {
+    const std::string bundled = std::string(kBundledFontsDir) + file;
+    if (readable(bundled)) return bundled;
+    const std::string installed = system_fonts_dir() + file;
+    if (readable(installed)) return installed;
+    return std::string();
+}
 
 Theme effective_theme(Theme t) {
     if (t != Theme::System) return t;
@@ -115,15 +132,22 @@ Theme effective_theme(Theme t) {
 
 const std::vector<FontChoice>& available_fonts() {
     static const std::vector<FontChoice> found = [] {
+        // The operator list, in the operator order. The first two come
+        // with Windows and the next two come with INOP. Harlow is a
+        // Microsoft face, neither bundled nor guaranteed, so it appears
+        // only where it is installed. Grandview was asked for and then
+        // dropped: it is a Microsoft font that may not be redistributed,
+        // so bundling it was never open to us.
         const FontChoice candidates[] = {
-            {"Times New Roman", "times.ttf"}, {"Georgia", "georgia.ttf"},
-            {"Segoe UI", "segoeui.ttf"},      {"Arial", "arial.ttf"},
-            {"Verdana", "verdana.ttf"},       {"Tahoma", "tahoma.ttf"},
-            {"Consolas", "consola.ttf"},
+            {"Courier New", "cour.ttf"},
+            {"Times New Roman", "times.ttf"},
+            {"Crimson Pro", "CrimsonPro.ttf"},
+            {"SGA", "sga-all-characters.otf"},
+            {"Harlow Solid Italic", "HARLOWSI.TTF"},
         };
         std::vector<FontChoice> out;
         for (const FontChoice& c : candidates)
-            if (font_present(c.file)) out.push_back(c);
+            if (!font_path(c.file).empty()) out.push_back(c);
         return out;
     }();
     return found;

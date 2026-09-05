@@ -1,5 +1,7 @@
 #include "gui_render.hpp"
 
+#include "gui_prefs.hpp"
+
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -217,16 +219,23 @@ void draw_rect_outline(float x, float y, float w, float h, Color c, float thickn
 }
 
 bool load_fonts(const std::string& font_file) {
-    const char* windir = std::getenv("WINDIR");
-    std::string fonts_dir = windir ? std::string(windir) + "\\Fonts\\" : "C:\\Windows\\Fonts\\";
+    // Finding the file is gui_prefs work and not renderer work: it owns
+    // the bundled folder and the system folder both, and the settings
+    // screen filters its list with the same answer this bake asks for.
+    const std::string path = font_path(font_file);
+    if (path.empty()) {
+        std::cerr << "gui: no font file named '" << font_file
+                  << "' in fonts/ or the system font folder\n";
+        return false;
+    }
     // One typeface throughout, not just the wordmark — Body/BodyLarge used
     // to be Segoe UI, but the operator asked for one consistent typeface
     // across the whole panel. Which one it is became a preference; that it
     // is the same one in all three sizes did not.
     free_atlases();
-    bool ok_body = bake_font(fonts_dir + font_file, 18.0f, g_body);
-    bool ok_word = bake_font(fonts_dir + font_file, 44.0f, g_wordmark);
-    bool ok_large = bake_font(fonts_dir + font_file, 28.0f, g_body_large);
+    bool ok_body = bake_font(path, 18.0f, g_body);
+    bool ok_word = bake_font(path, 44.0f, g_wordmark);
+    bool ok_large = bake_font(path, 28.0f, g_body_large);
     if (!(ok_body && ok_word && ok_large)) {
         free_atlases();
         return false;
