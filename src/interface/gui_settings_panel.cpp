@@ -198,9 +198,43 @@ void row_note(float x, float y, const std::string& text) {
 
 Rect control_rect(float x, float y) { return Rect{x + kLabelW + kGap, y, kCtrlW, kRowH}; }
 
+// What the search row accepts. Every label on this screen is letters and
+// spaces; the digits and the two marks are here so that a label added
+// later does not need this widened before it can be found.
+const char* const kSearchChars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -/";
+
+std::string fold_lower(const std::string& s) {
+    std::string out = s;
+    for (char& c : out)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    return out;
+}
+
+// Takes one typed character out of the frame and says whether it was
+// there. A shortcut that answers a letter has to take it, or the control
+// it jumps to types that same letter the moment it arrives.
+bool take_typed(GuiInput& in, unsigned int codepoint) {
+    for (std::size_t i = 0; i < in.typed.size(); ++i)
+        if (in.typed[i] == codepoint) {
+            in.typed.erase(in.typed.begin() + static_cast<std::ptrdiff_t>(i));
+            return true;
+        }
+    return false;
+}
+
 }  // namespace
 
+bool SettingsPanel::shown(const std::string& label) const {
+    if (search_.empty()) return true;
+    return fold_lower(label).find(fold_lower(search_)) != std::string::npos;
+}
+
 void SettingsPanel::open(const GuiPrefs& current) {
+    // A search left over from last time would open the screen already
+    // filtered, with nothing on it to say why half the rows are missing.
+    search_.clear();
+    scroll_ = 0.0f;
     pending_ = current;
     applied_ = current;
     colourblind_idx_ = index_of_colourblind(pending_.colourblind);
@@ -227,7 +261,10 @@ void SettingsPanel::set_status(const std::string& text, bool error) {
     status_error_ = error;
 }
 
-void SettingsPanel::frame(const GuiInput& in, int width, int height) {
+void SettingsPanel::frame(const GuiInput& real_in, int width, int height) {
+    // A copy, because the k shortcut has to take its own keystroke out of
+    // the frame before the box it jumps to could type it.
+    GuiInput in = real_in;
     back_clicked_ = false;
     wordmark_clicked_ = false;
 
@@ -268,11 +305,41 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
 
     float start = begin_scroll_region(top, w, footer_top, scroll_, content_h_, in);
 
-    float y = draw_accessibility(in, x, start);
-    y = draw_graphics(in, x, y + kSectionGap);
-    y = draw_appearance(in, x, y + kSectionGap);
-    y = draw_audio(x, y + kSectionGap);
-    y = draw_interface(in, x, y + kSectionGap);
+    // The search row sits above everything it filters, and is never
+    // filtered itself.
+    const Rect search_r = control_rect(x, start);
+    // k jumps into the box. Once the box has the focus, k is a letter like
+    // any other, so the shortcut only fires while the box does not have
+    // it, and the keystroke that fired it is taken out of the frame rather
+    // than typed on arrival. An open list has first claim on the keyboard,
+    // so it is left alone.
+    if (open_dropdown_id_ < 0 && !has_keyboard_focus(search_r) &&
+        (take_typed(in, 'k') || take_typed(in, 'K')))
+        set_keyboard_focus(search_r);
+    row_label(x, start, "Search", false);
+    // Filtering is a view and not a preference, so it never touches
+    // pending_ and Apply stays as dark as it was. A changed search does
+    // put the page back to the top, because a shorter list can otherwise
+    // be left scrolled past its own end.
+    if (text_field(search_r, search_, in, kSearchChars, 40, true, false, CaseFold::None,
+                   "type to filter"))
+        scroll_ = 0.0f;
+
+    float y = start + kRowH;
+    const float after_search = y;
+
+    y = draw_accessibility(in, x, y);
+    y = draw_graphics(in, x, y);
+    y = draw_appearance(in, x, y);
+    y = draw_audio(x, y);
+    y = draw_interface(in, x, y);
+
+    // Nothing drew, so the operator is looking at an empty page and is
+    // owed a reason for it.
+    if (y == after_search) {
+        label(Rect{x, y + kSectionGap, kColW, kRowH}, "No setting has that in its name.", true);
+        y += kSectionGap + kRowH;
+    }
 
     // Measured from where the content actually began, so the scroll clamp is
     // right whatever the zoom does to the row heights. The footer is no
@@ -373,80 +440,110 @@ float SettingsPanel::draw_header(const GuiInput& in, float width) {
     return pad + word_th + 12.0f + 10.0f;
 }
 
+// Every section takes the same shape now: nothing at all when the search
+// has taken all of its rows, because a heading over an empty space says
+// less than no heading. Each row advances by the same amount and the
+// section gives the last gap back, so a hidden row leaves no hole behind.
 float SettingsPanel::draw_accessibility(const GuiInput& in, float x, float y) {
-    y = heading(x, y, "Accessibility");
+    if (!shown("Arachnophobia mode") && !shown("Colour vision") && !shown("Font size")) return y;
+    y = heading(x, y + kSectionGap, "Accessibility");
 
-    row_label(x, y, "Arachnophobia mode", true);
-    toggle(control_rect(x, y), arachnophobia_, "nothing in the interface to hide yet", in, false);
-    y += kRowH + kRowGap;
+    if (shown("Arachnophobia mode")) {
+        row_label(x, y, "Arachnophobia mode", true);
+        toggle(control_rect(x, y), arachnophobia_, "nothing in the interface to hide yet", in,
+               false);
+        y += kRowH + kRowGap;
+    }
 
-    row_label(x, y, "Colour vision", false);
-    dropdown(control_rect(x, y), colourblind_options(), colourblind_idx_, kIdColourblind,
-             open_dropdown_id_, in, true);
-    y += kRowH + kRowGap;
+    if (shown("Colour vision")) {
+        row_label(x, y, "Colour vision", false);
+        dropdown(control_rect(x, y), colourblind_options(), colourblind_idx_, kIdColourblind,
+                 open_dropdown_id_, in, true);
+        y += kRowH + kRowGap;
+    }
 
-    row_label(x, y, "Font size", true);
-    dropdown(control_rect(x, y), font_size_options(), font_size_idx_, kIdFontSize,
-             open_dropdown_id_, in, false);
-    row_note(x, y, "waiting on the panel layouts to scale");
-    y += kRowH;
+    if (shown("Font size")) {
+        row_label(x, y, "Font size", true);
+        dropdown(control_rect(x, y), font_size_options(), font_size_idx_, kIdFontSize,
+                 open_dropdown_id_, in, false);
+        row_note(x, y, "waiting on the panel layouts to scale");
+        y += kRowH + kRowGap;
+    }
 
-    return y;
+    return y - kRowGap;
 }
 
 float SettingsPanel::draw_graphics(const GuiInput& in, float x, float y) {
-    y = heading(x, y, "Graphics");
+    if (!shown("Display mode") && !shown("Zoom") && !shown("Reduced motion")) return y;
+    y = heading(x, y + kSectionGap, "Graphics");
 
-    row_label(x, y, "Display mode", false);
-    dropdown(control_rect(x, y), display_mode_options(), window_mode_idx_, kIdDisplayMode,
-             open_dropdown_id_, in, true);
-    y += kRowH + kRowGap;
+    if (shown("Display mode")) {
+        row_label(x, y, "Display mode", false);
+        dropdown(control_rect(x, y), display_mode_options(), window_mode_idx_, kIdDisplayMode,
+                 open_dropdown_id_, in, true);
+        y += kRowH + kRowGap;
+    }
 
-    row_label(x, y, "Zoom", false);
-    dropdown(control_rect(x, y), zoom_options(), zoom_idx_, kIdZoom, open_dropdown_id_, in, true);
-    // Said before Apply rather than only after it, so the refusal is not a
-    // surprise. gui.cpp still enforces it — this is the warning, not the
-    // check.
-    if (zoom_at(zoom_idx_) > kMaxSupportedZoom)
-        row_note(x, y, "above " + std::to_string(kMaxSupportedZoom) +
-                           "% the panels do not fit a window this size yet");
-    y += kRowH + kRowGap;
+    if (shown("Zoom")) {
+        row_label(x, y, "Zoom", false);
+        dropdown(control_rect(x, y), zoom_options(), zoom_idx_, kIdZoom, open_dropdown_id_, in,
+                 true);
+        // Said before Apply rather than only after it, so the refusal is not
+        // a surprise. gui.cpp still enforces it — this is the warning, not
+        // the check.
+        if (zoom_at(zoom_idx_) > kMaxSupportedZoom)
+            row_note(x, y, "above " + std::to_string(kMaxSupportedZoom) +
+                               "% the panels do not fit a window this size yet");
+        y += kRowH + kRowGap;
+    }
 
-    row_label(x, y, "Reduced motion", false);
-    toggle(control_rect(x, y), pending_.reduced_motion, "no dips, no fades, nothing travels", in,
-           true);
-    y += kRowH;
+    if (shown("Reduced motion")) {
+        row_label(x, y, "Reduced motion", false);
+        toggle(control_rect(x, y), pending_.reduced_motion, "no dips, no fades, nothing travels",
+               in, true);
+        y += kRowH + kRowGap;
+    }
 
-    return y;
+    return y - kRowGap;
 }
 
 float SettingsPanel::draw_appearance(const GuiInput& in, float x, float y) {
-    y = heading(x, y, "Appearance");
+    if (!shown("Font family") && !shown("App mode")) return y;
+    y = heading(x, y + kSectionGap, "Appearance");
 
-    bool have_fonts = !available_fonts().empty();
-    row_label(x, y, "Font family", !have_fonts);
-    dropdown(control_rect(x, y), font_options(), font_idx_, kIdFont, open_dropdown_id_, in,
-             have_fonts);
-    if (!have_fonts) row_note(x, y, "no usable font file in the system font folder");
-    y += kRowH + kRowGap;
+    if (shown("Font family")) {
+        bool have_fonts = !available_fonts().empty();
+        row_label(x, y, "Font family", !have_fonts);
+        dropdown(control_rect(x, y), font_options(), font_idx_, kIdFont, open_dropdown_id_, in,
+                 have_fonts);
+        if (!have_fonts) row_note(x, y, "no usable font file in the system font folder");
+        y += kRowH + kRowGap;
+    }
 
-    row_label(x, y, "App mode", false);
-    dropdown(control_rect(x, y), theme_options(), theme_idx_, kIdTheme, open_dropdown_id_, in,
-             true);
-    y += kRowH;
+    if (shown("App mode")) {
+        row_label(x, y, "App mode", false);
+        dropdown(control_rect(x, y), theme_options(), theme_idx_, kIdTheme, open_dropdown_id_, in,
+                 true);
+        y += kRowH + kRowGap;
+    }
 
-    return y;
+    return y - kRowGap;
 }
 
 float SettingsPanel::draw_audio(float x, float y) {
-    y = heading(x, y, "Audio");
+    // No rows, so there is no label for a search to match. It goes whole
+    // rather than sitting there as a heading over a sentence nobody was
+    // looking for.
+    if (!search_.empty()) return y;
+    y = heading(x, y + kSectionGap, "Audio");
     label(Rect{x, y, kColW, kRowH}, "The application makes no sound yet, so there is nothing here.",
           true);
     return y + kRowH;
 }
 
 float SettingsPanel::draw_interface(const GuiInput& in, float x, float y) {
-    y = heading(x, y, "Interface");
+    if (!shown("Interface language")) return y;
+    y = heading(x, y + kSectionGap, "Interface");
 
     row_label(x, y, "Interface language", true);
     dropdown(control_rect(x, y), language_options(), language_idx_, kIdLanguage, open_dropdown_id_,

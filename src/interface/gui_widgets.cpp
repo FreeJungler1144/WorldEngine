@@ -179,6 +179,13 @@ void end_widget_frame(const GuiInput& in) {
     if (in.mouse_pressed && !g_click_consumed_this_frame) g_focus = nullptr;
 }
 
+bool has_keyboard_focus(const Rect& r) { return g_has_focus && same_rect(g_focused, r); }
+
+void set_keyboard_focus(const Rect& r) {
+    g_focused = r;
+    g_has_focus = true;
+}
+
 void resolve_focus(const GuiInput& in) {
     g_focus_ready.swap(g_focus_filling);
     g_focus_filling.clear();

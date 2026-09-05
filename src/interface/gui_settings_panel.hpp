@@ -64,6 +64,9 @@ private:
     float draw_audio(float x, float y);
     float draw_interface(const GuiInput& in, float x, float y);
 
+    // Whether a row carrying this label survives the current search.
+    bool shown(const std::string& label) const;
+
     // Pending is what the controls edit; applied is what was in force when
     // the screen opened or when Apply last succeeded. Apply is only
     // offered when they differ.
@@ -89,6 +92,12 @@ private:
     // layout pass, so it lags by one frame by construction.
     float scroll_ = 0.0f;
     float content_h_ = 0.0f;
+
+    // What is typed into the search row at the top. Empty means the screen
+    // looks exactly as it did before there was a search row. Matched
+    // against the row labels only, and never against a note, because a hit
+    // has to be a word the operator can see on the left of the row.
+    std::string search_;
 
     int open_dropdown_id_ = -1;
     std::string status_;

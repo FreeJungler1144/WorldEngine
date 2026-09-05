@@ -64,6 +64,17 @@ struct GuiInput {
 // refresh rate.
 void resolve_focus(const GuiInput& in);
 
+// Whether the keyboard focus is on this rect right now. Drawing a control
+// already answers this for the control itself, but a panel that wants to
+// answer a key with "put the focus over there" has to ask before it draws.
+bool has_keyboard_focus(const Rect& r);
+
+// Puts the keyboard focus on this rect, the way clicking it would. For a
+// shortcut that jumps to one named control -- the settings screen answers
+// k this way. Takes a rect because that is what focus is keyed on
+// everywhere else in here.
+void set_keyboard_focus(const Rect& r);
+
 // Call once at the very start of a frame, before any widget calls.
 void begin_widget_frame();
 // Call once at the very end of a frame (after every widget, including any
