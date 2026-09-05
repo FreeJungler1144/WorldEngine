@@ -1,0 +1,6 @@
+# Opens and quits without touching anything.
+#
+# Delete inop.gui.json first. If it comes back, the save on the way out of
+# the GUI loop ran and the write worked.
+wait 0.4
+quit

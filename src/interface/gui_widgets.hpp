@@ -30,10 +30,20 @@ struct GuiInput {
     double mouse_x = 0, mouse_y = 0;
     bool mouse_pressed = false;   // left button went down this frame
     bool mouse_released = false;  // left button went up this frame
+    // Down right now, as opposed to the two edges above. A dip has to hold
+    // for as long as the control is held, which neither edge can say.
+    bool mouse_held = false;
     std::vector<unsigned int> typed;  // codepoints typed this frame
     bool key_backspace = false;
     bool key_enter = false;
     bool key_escape = false;
+    // The four arrows move the keyboard focus from control to control, by
+    // position rather than by draw order -- see resolve_focus() below. An
+    // open dropdown takes them for its own list instead.
+    bool key_left = false;
+    bool key_right = false;
+    bool key_up = false;
+    bool key_down = false;
     double scroll_y = 0;
     // Held, not pressed: the convention across this interface is that
     // holding Control while doing something that would normally warn you
@@ -42,6 +52,17 @@ struct GuiInput {
     // at the moment of the click or keypress.
     bool ctrl_held = false;
 };
+
+// Called once per frame by gui.cpp, before the screen draws, with the
+// REAL input for the frame -- a modal has to be reachable from the
+// keyboard too, and the screen behind one is handed neutered input.
+//
+// Moves the keyboard focus if an arrow was pressed. It works off the rects
+// that registered themselves during the previous frame, because a frame
+// only knows what is on it once it has drawn: one frame of lag, which is
+// the same trade the scroll regions already make and is invisible at any
+// refresh rate.
+void resolve_focus(const GuiInput& in);
 
 // Call once at the very start of a frame, before any widget calls.
 void begin_widget_frame();
@@ -142,6 +163,11 @@ bool numeric_field(const Rect& r, std::string& value, const GuiInput& in, size_t
 bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selected, int id,
               int& open_dropdown_id, const GuiInput& in, bool enabled, bool invalid = false);
 
+// Whether a dropdown list is open on screen. gui.cpp asks so that Escape
+// closes the list rather than leaving the screen: with a list open the key
+// plainly means the list, and answering both would do two things at once.
+bool dropdown_popup_open();
+
 // Draws the popup list for whichever dropdown is currently open (if any),
 // on top of everything else, using the frame's REAL (non-neutered) input.
 // Call this once, last, every frame.
@@ -193,6 +219,39 @@ ModalChoice modal_question(float screen_w, float screen_h, const std::string& ti
 // dismissed, by the button, by Enter or by Escape.
 bool modal_notice(float screen_w, float screen_h, const std::string& title,
                   const std::string& body, const GuiInput& in);
+
+// -- tooltips ------------------------------------------------------------
+//
+// Call right after drawing the control it belongs to, with that controls
+// own rect. Nothing happens until the pointer has rested there for
+// kTooltipDelay; after that the text is put aside and drawn later by
+// draw_pending_tooltip(), which is what gets it above the controls it
+// would otherwise appear behind. The same deferral the dropdown popup
+// uses, and simpler than that one, because a tooltip is never clicked and
+// so never needs the remembered rect that stops a click landing on
+// whatever is underneath.
+//
+// Drawn text is ASCII 32 to 127 like every other string here: the baked
+// atlas has nothing else, and anything outside that range comes out as a
+// hole.
+void tooltip(const Rect& r, const std::string& text, const GuiInput& in);
+
+// Draws whichever tooltip was asked for this frame, above everything the
+// screen drew including an open dropdown popup. Called once, by gui.cpp,
+// after the screen frame returns and before any modal, so that a modal
+// still covers it.
+void draw_pending_tooltip(float screen_w, float screen_h);
+
+// How long the pointer has to rest on a control before its tooltip
+// appears. The point of the wait is that somebody who already knows where
+// they are going never sees one.
+//
+// It started at 1.5 seconds, which is what VS Code was timed at. That
+// measurement is kept here rather than dropped, because it is where the
+// figure came from, but the value in force is 1 second, settled by
+// watching this interface run rather than by copying another one. One
+// number, here and nowhere else, so it stays easy to move again.
+extern const float kTooltipDelay;
 
 }  // namespace gui
 }  // namespace inop

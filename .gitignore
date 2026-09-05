@@ -75,3 +75,9 @@ maria.txt
 # Untracked deliberately by the owner on this branch (it had been tracked
 # since the project started). Nothing written here should cite it.
 DESIGN.md
+
+# ── screenshots a scripted run takes of itself ──────────────────────────
+# `shot <name>` in a GUI script writes gui-shots/<name>.png next to
+# wherever the binary was run from. They are evidence for one session, not
+# something the repository should carry.
+gui-shots/

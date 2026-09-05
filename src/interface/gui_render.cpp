@@ -115,6 +115,10 @@ const FontAtlas& atlas_for(Font font) {
 int g_viewport_w = 0;
 int g_viewport_h = 0;  // needed to flip our top-left-origin rects into glScissor's bottom-left ones
 float g_ui_scale = 1.0f;
+// How far everything drawn is shifted, in logical units. Only ever moved
+// by gui.cpp while one screen slides off and another slides on.
+float g_offset_x = 0.0f;
+float g_offset_y = 0.0f;
 
 }  // namespace
 
@@ -145,6 +149,17 @@ void set_viewport(int width, int height) {
             static_cast<double>(height) / g_ui_scale, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+    // Reapplied rather than dropped: a resize in the middle of a screen
+    // transition would otherwise snap both halves back to the origin.
+    glTranslatef(g_offset_x, g_offset_y, 0.0f);
+}
+
+void set_draw_offset(float dx, float dy) {
+    g_offset_x = dx;
+    g_offset_y = dy;
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(dx, dy, 0.0f);
 }
 
 void set_ui_scale(float scale) {
@@ -162,7 +177,11 @@ void begin_scissor(float x, float y, float w, float h) {
     // coordinate space. It also speaks pixels while callers speak logical
     // units, so the scale has to be undone on the way in.
     const float s = g_ui_scale;
-    const float px = x * s, py = y * s, pw = w * s, ph = h * s;
+    // The offset is part of where the caller actually is on screen, and
+    // glScissor knows nothing about the modelview matrix, so it has to be
+    // added by hand here.
+    const float px = (x + g_offset_x) * s, py = (y + g_offset_y) * s;
+    const float pw = w * s, ph = h * s;
     glScissor(static_cast<int>(px), static_cast<int>(static_cast<float>(g_viewport_h) - (py + ph)),
               static_cast<int>(pw), static_cast<int>(ph));
 }

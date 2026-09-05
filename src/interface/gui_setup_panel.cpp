@@ -332,7 +332,6 @@ void SetupPanel::frame(const GuiInput& real_in, int width, int height) {
     }
 
     float w = static_cast<float>(width), h = static_cast<float>(height);
-    clear(palette::background());
 
     const float header_h = 110.0f;
     const float top_h = 190.0f;

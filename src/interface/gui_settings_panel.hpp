@@ -9,9 +9,9 @@
 //
 // Several rows are drawn locked on purpose. They are the settings the
 // operator has asked for whose subject does not exist yet — there is no
-// sound to switch off, nothing animates, no translation to switch to —
-// and showing them disabled says that more honestly than leaving them out
-// and more honestly than a live control that quietly does nothing.
+// sound to switch off and no translation to switch to — and showing
+// them disabled says that more honestly than leaving them out and more
+// honestly than a live control that quietly does nothing.
 #pragma once
 
 #include <string>
@@ -48,6 +48,12 @@ public:
     // failure colour.
     void set_status(const std::string& text, bool error);
 
+    // Whether an edit is sitting here waiting on Apply. Asked by gui.cpp
+    // on the way out: leaving the GUI saves the preferences in force, and
+    // it has no way to save one that was never applied, so the quit modal
+    // names the loss rather than claiming everything is safe.
+    bool has_unapplied_changes() const { return pending_ != applied_; }
+
 private:
     float draw_header(const GuiInput& in, float width);
     // Each draws one section downward from `y` and returns the y just past
@@ -75,7 +81,6 @@ private:
     // Locked rows still need somewhere for the widget to write, since the
     // widget set takes a reference. Nothing reads these.
     bool arachnophobia_ = false;
-    bool reduced_motion_ = false;
     int font_size_idx_ = 1;  // Normal
     int language_idx_ = 0;
 

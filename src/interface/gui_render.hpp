@@ -25,6 +25,18 @@ void render_shutdown();
 // Call whenever the framebuffer size changes (including at startup).
 void set_viewport(int width, int height);
 
+// Shifts everything drawn after it by (dx, dy) logical units. One call
+// moves a whole screen, which is what lets two of them be drawn side by
+// side while one slides off and the other slides on.
+//
+// A render target would be the other way to do that, and is the wrong one
+// here: an FBO wants a context this renderer deliberately does not ask
+// for. See the header comment about the compatibility context.
+//
+// Scissor rectangles follow the offset too, or a panel that clips its own
+// scrolling content would clip it where the panel is not.
+void set_draw_offset(float dx, float dy);
+
 // How many pixels one logical unit is worth. Everything drawn is in
 // logical units, so raising this grows layout and text together and
 // nothing can overflow a control that fitted at 1.0 — which is what

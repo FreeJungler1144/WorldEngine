@@ -60,9 +60,9 @@ struct FontChoice {
 const std::vector<FontChoice>& available_fonts();
 
 // The preferences that currently do something. Rows the settings screen
-// draws locked (arachnophobia mode, font size, reduced motion, audio,
-// interface language) are deliberately absent: nothing reads them, so
-// nothing should store them either.
+// draws locked (arachnophobia mode, font size, audio, interface language)
+// are deliberately absent: nothing reads them, so nothing should store
+// them either.
 struct GuiPrefs {
     Theme theme = Theme::System;
     ColourblindMode colourblind = ColourblindMode::Full;
@@ -73,6 +73,11 @@ struct GuiPrefs {
     // because it only ever takes the fixed steps the dropdown offers, and
     // a rounded percentage survives a round trip through JSON exactly.
     int zoom_percent = 100;
+    // Less motion rather than none. The interface still answers a hover
+    // and a press, it just stops travelling to get there: no dip, no
+    // fade, nothing that moves position moves. Off by default, because
+    // the motion is the point of having built it.
+    bool reduced_motion = false;
 };
 
 // The steps the zoom control offers, 50 to 250 in 25s.

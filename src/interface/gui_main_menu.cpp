@@ -17,7 +17,6 @@ void MainMenu::frame(const GuiInput& in, int width, int height) {
 
     float w = static_cast<float>(width), h = static_cast<float>(height);
     begin_widget_frame();
-    clear(palette::background());
 
     // Title, top centre, just under the margin — reuses the Wordmark font
     // (44pt), the largest atlas baked; ask if this needs to be bigger than

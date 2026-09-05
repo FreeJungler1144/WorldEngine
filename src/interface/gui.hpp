@@ -7,6 +7,8 @@
 // entirely by CMakeLists.txt's source list — main.cpp needs no #ifdef.
 #pragma once
 
+#include <string>
+
 namespace inop {
 
 // Why the GUI closed, which is what decides whether the process ends or
@@ -23,12 +25,17 @@ enum class GuiExit { Quit, Terminal };
 // is useful.
 bool gui_available();
 
+// `script_path`, when it is not empty, names a file that fills the input
+// struct instead of the pointer and the keyboard -- see gui_script.hpp.
+// The window is still real and still visible; only the filling of the
+// struct changes, and nothing else in the GUI can tell the difference.
+//
 // Opens the GUI window and blocks until the operator closes it. Opens on
 // the main menu (gui_main_menu.hpp); "Open INOP" there leads to the
 // machine setup screen (gui_setup_panel.hpp), whose own INOP wordmark
 // leads back and whose "Next" button leads on to the enciphering screen
 // (gui_enciphering_panel.hpp). Maintenance (gui_maintenance_panel.hpp) and
 // Settings (gui_settings_panel.hpp) are both real screens now.
-GuiExit run_gui_settings();
+GuiExit run_gui_settings(const std::string& script_path = "");
 
 }  // namespace inop

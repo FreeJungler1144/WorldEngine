@@ -154,7 +154,6 @@ void MaintenancePanel::frame(const GuiInput& in, int width, int height) {
 
     float w = static_cast<float>(width), h = static_cast<float>(height);
     begin_widget_frame();
-    clear(palette::background());
 
     float top = draw_header(in, w);
     float x = std::max(kMargin, (w - kColW) * 0.5f);

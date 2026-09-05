@@ -156,7 +156,7 @@ const int kMaxSupportedZoom = 200;
 bool operator==(const GuiPrefs& a, const GuiPrefs& b) {
     return a.theme == b.theme && a.colourblind == b.colourblind &&
            a.window_mode == b.window_mode && a.font_file == b.font_file &&
-           a.zoom_percent == b.zoom_percent;
+           a.zoom_percent == b.zoom_percent && a.reduced_motion == b.reduced_motion;
 }
 
 bool load_prefs(GuiPrefs& p, const std::string& path) {
@@ -190,6 +190,12 @@ bool load_prefs(GuiPrefs& p, const std::string& path) {
             if (step == z) read.zoom_percent = z;
     }
 
+    // A preferences file written before this setting existed has no key
+    // at all, and full motion is exactly what that build did, so the
+    // default is also the honest reading of an older file.
+    if (j.contains("reduced_motion") && j["reduced_motion"].is_boolean())
+        read.reduced_motion = j["reduced_motion"].get<bool>();
+
     p = read;
     return true;
 }
@@ -201,6 +207,7 @@ bool save_prefs(const GuiPrefs& p, const std::string& path) {
     j["window_mode"] = window_mode_name(p.window_mode);
     j["font"] = p.font_file;
     j["zoom"] = p.zoom_percent;
+    j["reduced_motion"] = p.reduced_motion;
 
     std::ofstream f(path);
     if (!f) return false;

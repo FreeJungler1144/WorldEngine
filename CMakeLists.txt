@@ -87,6 +87,8 @@ if(INOP_WITH_GUI)
     src/interface/gui.cpp
     src/interface/gui_render.cpp
     src/interface/gui_widgets.cpp
+    src/interface/gui_anim.cpp
+    src/interface/gui_script.cpp
     src/interface/gui_config_store.cpp
     src/interface/gui_file_tile_panel.cpp
     src/interface/gui_setup_panel.cpp

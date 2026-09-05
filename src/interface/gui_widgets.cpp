@@ -1,6 +1,9 @@
 #include "gui_widgets.hpp"
 
 #include <algorithm>
+#include <cmath>
+
+#include "gui_anim.hpp"
 
 namespace inop {
 namespace gui {
@@ -57,6 +60,18 @@ bool g_popup_drawn_this_frame = false;
 // and would swallow the click that dismisses it.
 bool g_in_modal = false;
 
+// The tooltip asked for this frame, if any. Deferred for the same reason
+// the dropdown popup is, so that it lands above whatever it overlaps.
+// Nothing here is remembered across frames: unlike the popup it takes no
+// clicks, so there is no last frame rect to test against.
+struct PendingTooltip {
+    bool active = false;
+    Rect anchor{0, 0, 0, 0};
+    std::string text;
+    float shown_for = 0.0f;
+};
+PendingTooltip g_tooltip;
+
 bool click_over_open_popup(const GuiInput& in) {
     if (g_in_modal) return false;
     return g_popup_shown_last && rect_contains(g_popup_rect_last, in.mouse_x, in.mouse_y);
@@ -64,9 +79,71 @@ bool click_over_open_popup(const GuiInput& in) {
 
 const float PAD = 6.0f;
 
+// -- keyboard focus ------------------------------------------------------
+//
+// Immediate mode keeps no widget tree, so a focus is keyed on the rect a
+// control draws itself into, exactly as the animation timers are. That is
+// why every widget got a hover highlight rather than only the buttons: a
+// rect handed to gui_anim can be lit by a keyboard focus without a second
+// highlight path beside the hover one.
+//
+// Navigation is by position and not by draw order. The setup screen is a
+// real grid -- rotor rows against a ring column and a notch column, with
+// the plugboard pairs below -- and a flat order would make Down walk
+// sideways through it.
+//
+// The rects are collected as the frame draws and the arrows are answered
+// at the start of the next one. A frame cannot know what is on it until it
+// has drawn, so there is no earlier moment to answer them.
+
+struct FocusRect {
+    Rect r;
+    // Whether it was drawn as part of a modal. A modal owns the keyboard
+    // while it is up, and this is how that falls out without anything else
+    // having to know a modal is open.
+    bool in_modal = false;
+};
+
+std::vector<FocusRect> g_focus_filling;  // the frame being drawn now
+std::vector<FocusRect> g_focus_ready;    // the frame that finished drawing
+Rect g_focused{0, 0, 0, 0};
+bool g_has_focus = false;
+
+bool same_rect(const Rect& a, const Rect& b) {
+    const float e = 0.5f;
+    return std::fabs(a.x - b.x) < e && std::fabs(a.y - b.y) < e &&
+           std::fabs(a.w - b.w) < e && std::fabs(a.h - b.h) < e;
+}
+
+// Registers a control as somewhere the focus can land, and says whether it
+// is where the focus is right now. Disabled controls never call this: one
+// that cannot be worked cannot be reached either.
+//
+// A click also moves the focus here, so the pointer and the keyboard share
+// one idea of where you are rather than each keeping their own.
+bool focus_register(const Rect& r, const GuiInput& in) {
+    g_focus_filling.push_back(FocusRect{r, g_in_modal});
+    if (in.mouse_pressed && rect_contains(r, in.mouse_x, in.mouse_y) &&
+        !click_over_open_popup(in)) {
+        g_focused = r;
+        g_has_focus = true;
+    }
+    return g_has_focus && same_rect(g_focused, r);
+}
+
+// A thin brass ring just outside the control. Outside rather than on it,
+// because the control already uses its own border for hover and for
+// invalid, and a focus that borrowed either of those would be telling you
+// two things with one line.
+void draw_focus_ring(const Rect& r) {
+    draw_rect_outline(r.x - 3.0f, r.y - 3.0f, r.w + 6.0f, r.h + 6.0f, palette::accent());
+}
+
 }  // namespace
 
 void begin_widget_frame() {
+    anim_begin_frame();
+    g_tooltip.active = false;
     g_click_consumed_this_frame = false;
     g_pending.active = false;
     g_popup_shown_last = g_popup_drawn_this_frame;
@@ -75,6 +152,116 @@ void begin_widget_frame() {
 
 void end_widget_frame(const GuiInput& in) {
     if (in.mouse_pressed && !g_click_consumed_this_frame) g_focus = nullptr;
+}
+
+void resolve_focus(const GuiInput& in) {
+    g_focus_ready.swap(g_focus_filling);
+    g_focus_filling.clear();
+
+    // A modal drew last frame, so it and nothing else is reachable.
+    bool modal = false;
+    for (const FocusRect& c : g_focus_ready)
+        if (c.in_modal) {
+            modal = true;
+            break;
+        }
+
+    std::vector<Rect> pool;
+    for (const FocusRect& c : g_focus_ready)
+        if (c.in_modal == modal) pool.push_back(c.r);
+
+    // The focus dies with the control it was on. A screen change, or a
+    // modal opening or closing, leaves it pointing at a rect nothing draws
+    // any more, and an arrow pressed later would navigate from nowhere.
+    if (g_has_focus) {
+        bool still_there = false;
+        for (const Rect& r : pool)
+            if (same_rect(r, g_focused)) {
+                still_there = true;
+                break;
+            }
+        if (!still_there) g_has_focus = false;
+    }
+
+    const bool up = in.key_up, down = in.key_down;
+    const bool left = in.key_left, right = in.key_right;
+    if (pool.empty() || (!up && !down && !left && !right)) return;
+
+    // An open list has first claim on the arrows, and answers them itself
+    // in draw_open_dropdown_popup(). g_popup_drawn_this_frame still holds
+    // last frames answer here, because begin_widget_frame() ages it and
+    // has not run yet.
+    if (g_popup_drawn_this_frame) return;
+
+    if (!g_has_focus) {
+        // The first press lands on the first control on the screen, in
+        // reading order, whatever the pointer happens to be doing. The
+        // same key always starts you in the same place.
+        const Rect* first = &pool[0];
+        for (const Rect& r : pool)
+            if (r.y < first->y - 0.5f || (std::fabs(r.y - first->y) < 0.5f && r.x < first->x))
+                first = &r;
+        g_focused = *first;
+        g_has_focus = true;
+        return;
+    }
+
+    // Two classes of candidate, and the first always beats the second.
+    //
+    // A control lines up when its span overlaps the focused one across the
+    // direction of travel: for Down and Up that is the horizontal span,
+    // for Left and Right the vertical one. Those are the ones an arrow
+    // obviously means, and taking the nearest of them is what makes Down
+    // walk down one column of the rotor grid instead of stepping into the
+    // ring column because something there happened to be nearer.
+    //
+    // Nothing lines up with a control sitting alone in a corner, such as
+    // Back on the settings screen. Only then does the second class matter,
+    // and there the nearest thing in that direction is the whole of the
+    // answer -- weighing sideways distance more heavily there sends the
+    // focus to the far bottom of the screen, which is what it used to do.
+    const Rect& f = g_focused;
+    const float cx = f.x + f.w * 0.5f;
+    const float cy = f.y + f.h * 0.5f;
+    const bool vertical = up || down;
+    const Rect* best = nullptr;
+    float best_score = 0.0f;
+    bool best_lines_up = false;
+    for (const Rect& r : pool) {
+        if (same_rect(r, f)) continue;
+        const float rx = r.x + r.w * 0.5f;
+        const float ry = r.y + r.h * 0.5f;
+        float along = 0.0f, across = 0.0f;
+        if (down) {
+            along = ry - cy;
+            across = std::fabs(rx - cx);
+        } else if (up) {
+            along = cy - ry;
+            across = std::fabs(rx - cx);
+        } else if (right) {
+            along = rx - cx;
+            across = std::fabs(ry - cy);
+        } else {
+            along = cx - rx;
+            across = std::fabs(ry - cy);
+        }
+        // Nothing behind the arrow, and nothing level with it either: a
+        // control whose centre has not moved in the direction pressed is
+        // not what that arrow means.
+        if (along <= 1.0f) continue;
+
+        const bool lines_up = vertical ? (r.x < f.x + f.w && f.x < r.x + r.w)
+                                       : (r.y < f.y + f.h && f.y < r.y + r.h);
+        const float score = along + across;
+        const bool better = !best || (lines_up && !best_lines_up) ||
+                            (lines_up == best_lines_up && score < best_score);
+        if (better) {
+            best = &r;
+            best_score = score;
+            best_lines_up = lines_up;
+        }
+    }
+    if (best) g_focused = *best;
 }
 
 namespace palette {
@@ -211,6 +398,58 @@ Color on_accent() {
 }
 }  // namespace palette
 
+namespace {
+
+// How far a control sinks while it is held, in logical units, so the dip
+// is the same fraction of a button at every zoom.
+constexpr float kDipTravel = 2.0f;
+
+Color mix(Color a, Color b, float t) {
+    return rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
+                a.a + (b.a - a.a) * t);
+}
+
+// Every control lifts toward the same mid grey the dropdown popup already
+// uses for its hovered row, so one hover reads the same wherever it
+// happens. That grey sits between the two themes rather than above them,
+// which is what lets a single blend brighten a dark panel and darken a
+// light one.
+Color hover_lift(Color base, float t) {
+    if (t <= 0.0f) return base;
+    return mix(base, palette::border(), 0.50f * t);
+}
+
+// Brass mixed with grey reads as dirty rather than as lit, so an accent
+// control lifts toward white instead, and less far, since it is already
+// the brightest thing on the screen.
+Color hover_lift_accent(Color base, float t) {
+    if (t <= 0.0f) return base;
+    return mix(base, rgba(1.0f, 1.0f, 1.0f, base.a), 0.22f * t);
+}
+
+// A text field already has a loud state of its own in the focus ring, so
+// its hover is a hint and not an announcement.
+Color hover_lift_soft(Color base, float t) {
+    if (t <= 0.0f) return base;
+    return mix(base, palette::border(), 0.22f * t);
+}
+
+// A held control sinks toward its own shadow. Unlike the lift this goes
+// the same way in both themes, because a pressed control reads as further
+// off whichever way round the palette is.
+Color press_sink(Color base, float t) {
+    if (t <= 0.0f) return base;
+    return mix(base, rgba(0.0f, 0.0f, 0.0f, base.a), 0.20f * t);
+}
+
+// The hover ring. Drawn by recolouring the border rather than as a second
+// outline, so nothing changes size and no neighbour has to move.
+Color hover_border(float t) {
+    return mix(palette::border(), palette::accent(), 0.55f * t);
+}
+
+}  // namespace
+
 void label(const Rect& r, const std::string& text, bool dim, Font font) {
     float ty = r.y + (r.h + text_line_height(font) * 0.7f) * 0.5f;
     draw_text(font, r.x, ty, text, dim ? palette::text_dim() : palette::text());
@@ -218,31 +457,63 @@ void label(const Rect& r, const std::string& text, bool dim, Font font) {
 
 bool button(const Rect& r, const std::string& text, const GuiInput& in, bool enabled,
             bool accent) {
+    // A disabled control asks for nothing and so claims no timer: it
+    // cannot be lit and it cannot be pressed.
+    WidgetMotion m = enabled ? widget_motion(r, in) : WidgetMotion{};
+    const bool kb = enabled && focus_register(r, in);
     bool hovered = rect_contains(r, in.mouse_x, in.mouse_y);
     bool clicked = false;
+
+    // The dip moves what is drawn and never what is hit. A control that
+    // slid out from under the pointer as it went down would take the click
+    // with it.
+    float dip = motion_enabled() ? m.press * kDipTravel : 0.0f;
+    Rect d{r.x, r.y + dip, r.w, r.h};
+
     Color bg = !enabled ? palette::disabled_bg()
                          : (accent ? palette::accent() : palette::panel());
-    draw_rect(r.x, r.y, r.w, r.h, bg);
-    draw_rect_outline(r.x, r.y, r.w, r.h, palette::border());
+    if (enabled) {
+        bg = accent ? hover_lift_accent(bg, m.hover) : hover_lift(bg, m.hover);
+        bg = press_sink(bg, m.press);
+    }
+    draw_rect(d.x, d.y, d.w, d.h, bg);
+    draw_rect_outline(d.x, d.y, d.w, d.h,
+                      enabled ? hover_border(m.hover) : palette::border());
+    if (kb) draw_focus_ring(d);
     Color fg = !enabled ? palette::disabled_text()
                          : (accent ? palette::on_accent() : palette::text());
     float tw = text_width(Font::Body, text);
-    float tx = r.x + (r.w - tw) * 0.5f;
-    float ty = r.y + (r.h + text_line_height(Font::Body) * 0.7f) * 0.5f;
+    float tx = d.x + (d.w - tw) * 0.5f;
+    float ty = d.y + (d.h + text_line_height(Font::Body) * 0.7f) * 0.5f;
     draw_text(Font::Body, tx, ty, text, fg);
     if (enabled && hovered && in.mouse_pressed && !click_over_open_popup(in)) {
         clicked = true;
         g_click_consumed_this_frame = true;
     }
+    // Enter works the focused control whatever the pointer is doing, which
+    // is the entire point of being able to reach one without a pointer.
+    if (kb && in.key_enter) clicked = true;
     return clicked;
 }
 
 bool wordmark_button(const Rect& r, const GuiInput& in) {
+    WidgetMotion m = widget_motion(r, in);
+    const bool kb = focus_register(r, in);
     bool hovered = rect_contains(r, in.mouse_x, in.mouse_y);
-    if (hovered) draw_rect(r.x, r.y, r.w, r.h, palette::panel());
-    draw_text(Font::Wordmark, r.x + 8, r.y + text_line_height(Font::Wordmark) * 0.75f, "INOP",
-              palette::text());
-    return hovered && in.mouse_pressed;
+    float dip = motion_enabled() ? m.press * kDipTravel : 0.0f;
+    // The fill fades in now rather than snapping on. Before these timers
+    // existed this was the one hard edged hover in the interface, and
+    // leaving it that way would have made the wordmark the odd control out
+    // on every screen that carries it.
+    if (m.hover > 0.0f) {
+        Color fill = press_sink(palette::panel(), m.press);
+        fill.a = m.hover;
+        draw_rect(r.x, r.y + dip, r.w, r.h, fill);
+    }
+    draw_text(Font::Wordmark, r.x + 8, r.y + dip + text_line_height(Font::Wordmark) * 0.75f,
+              "INOP", palette::text());
+    if (kb) draw_focus_ring(r);
+    return (hovered && in.mouse_pressed) || (kb && in.key_enter);
 }
 
 namespace {
@@ -347,15 +618,32 @@ bool toggle(const Rect& r, bool& value, const std::string& text, const GuiInput&
     bool changed = false;
     float box_size = r.h;
     Rect box{r.x, r.y, box_size, box_size};
+    // Keyed on the box and not on the whole row, so the toggle lights only
+    // where the pointer can actually click it.
+    WidgetMotion m = enabled ? widget_motion(box, in) : WidgetMotion{};
+    const bool kb = enabled && focus_register(box, in);
+    float dip = motion_enabled() ? m.press * kDipTravel : 0.0f;
+    Rect d{box.x, box.y + dip, box.w, box.h};
     Color bg = !enabled ? palette::disabled_bg() : (value ? palette::accent() : palette::panel());
-    draw_rect(box.x, box.y, box.w, box.h, bg);
-    draw_rect_outline(box.x, box.y, box.w, box.h, palette::border());
+    if (enabled) {
+        bg = value ? hover_lift_accent(bg, m.hover) : hover_lift(bg, m.hover);
+        bg = press_sink(bg, m.press);
+    }
+    draw_rect(d.x, d.y, d.w, d.h, bg);
+    draw_rect_outline(d.x, d.y, d.w, d.h, enabled ? hover_border(m.hover) : palette::border());
+    if (kb) draw_focus_ring(d);
+    // The caption stays put while the box dips, the way the label beside a
+    // physical switch does not travel with the switch.
     label(Rect{r.x + box_size + PAD, r.y, r.w - box_size - PAD, r.h}, text, !enabled);
     if (enabled && rect_contains(box, in.mouse_x, in.mouse_y) && in.mouse_pressed &&
         !click_over_open_popup(in)) {
         value = !value;
         changed = true;
         g_click_consumed_this_frame = true;
+    }
+    if (kb && in.key_enter) {
+        value = !value;
+        changed = true;
     }
     return changed;
 }
@@ -364,6 +652,12 @@ bool text_field(const Rect& r, std::string& value, const GuiInput& in, const std
                  size_t max_len, bool enabled, bool invalid, CaseFold case_fold,
                  const std::string& placeholder, bool center_text) {
     bool changed = false;
+    // A keyboard focus on a field is the same thing as the field being the
+    // one that types. There is no caret to move -- editing here is append
+    // and backspace only -- so Left and Right never have to mean anything
+    // inside a field, and the arrows stay navigation everywhere.
+    const bool kb = enabled && focus_register(r, in);
+    if (kb) g_focus = &value;
     bool focused = enabled && g_focus == static_cast<const void*>(&value);
 
     if (enabled && rect_contains(r, in.mouse_x, in.mouse_y) && in.mouse_pressed &&
@@ -390,10 +684,17 @@ bool text_field(const Rect& r, std::string& value, const GuiInput& in, const std
         }
     }
 
+    // No dip here: a click places a caret rather than working a control,
+    // and a field that sank under the pointer would say the wrong thing
+    // about what just happened.
+    WidgetMotion m = enabled ? widget_motion(r, in) : WidgetMotion{};
     Color bg = !enabled ? palette::disabled_bg() : palette::panel();
+    if (enabled && !focused) bg = hover_lift_soft(bg, m.hover);
     draw_rect(r.x, r.y, r.w, r.h, bg);
-    Color border = invalid ? palette::border_invalid() : (focused ? palette::accent() : palette::border());
+    Color border = invalid ? palette::border_invalid()
+                           : (focused ? palette::accent() : hover_border(m.hover));
     draw_rect_outline(r.x, r.y, r.w, r.h, border, focused ? 2.0f : 1.0f);
+    if (kb) draw_focus_ring(r);
     if (value.empty() && !focused && !placeholder.empty()) {
         if (center_text) {
             float tw = text_width(Font::Body, placeholder);
@@ -439,20 +740,38 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
     bool changed = false;
     bool is_open = enabled && open_dropdown_id == id;
 
+    WidgetMotion m = enabled ? widget_motion(r, in) : WidgetMotion{};
+    const bool kb = enabled && focus_register(r, in);
+    float dip = motion_enabled() ? m.press * kDipTravel : 0.0f;
+    Rect d{r.x, r.y + dip, r.w, r.h};
+
     Color bg = !enabled ? palette::disabled_bg() : palette::panel();
-    draw_rect(r.x, r.y, r.w, r.h, bg);
-    Color border_color =
-        invalid ? palette::border_invalid() : (is_open ? palette::accent() : palette::border());
-    draw_rect_outline(r.x, r.y, r.w, r.h, border_color);
+    if (enabled) {
+        bg = hover_lift(bg, m.hover);
+        bg = press_sink(bg, m.press);
+    }
+    draw_rect(d.x, d.y, d.w, d.h, bg);
+    // An open list already owns the accent border, so the hover ring has
+    // nothing to add there and would only make the two states look alike.
+    Color border_color = invalid ? palette::border_invalid()
+                                 : (is_open ? palette::accent() : hover_border(m.hover));
+    draw_rect_outline(d.x, d.y, d.w, d.h, border_color);
+    if (kb) draw_focus_ring(d);
     std::string shown =
         (selected >= 0 && selected < static_cast<int>(options.size())) ? options[static_cast<size_t>(selected)] : "";
-    label(Rect{r.x + PAD, r.y, r.w - 2 * PAD - 14, r.h}, shown, !enabled);
-    label(Rect{r.x + r.w - 16, r.y, 14, r.h}, is_open ? "^" : "v", !enabled);
+    label(Rect{d.x + PAD, d.y, d.w - 2 * PAD - 14, d.h}, shown, !enabled);
+    label(Rect{d.x + d.w - 16, d.y, 14, d.h}, is_open ? "^" : "v", !enabled);
 
     if (enabled && rect_contains(r, in.mouse_x, in.mouse_y) && in.mouse_pressed &&
         !click_over_open_popup(in)) {
         open_dropdown_id = is_open ? -1 : id;
         g_click_consumed_this_frame = true;
+        is_open = !is_open;
+    }
+    // Enter opens the list, and Enter inside it takes what is highlighted
+    // and closes again -- see draw_open_dropdown_popup().
+    if (kb && in.key_enter) {
+        open_dropdown_id = is_open ? -1 : id;
         is_open = !is_open;
     }
 
@@ -465,6 +784,8 @@ bool dropdown(const Rect& r, const std::vector<std::string>& options, int& selec
     }
     return changed;
 }
+
+bool dropdown_popup_open() { return g_popup_drawn_this_frame; }
 
 void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
     if (!g_pending.active || !g_pending.options) return;
@@ -486,6 +807,31 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
     if (g_popup_scroll < 0.0f) g_popup_scroll = 0.0f;
     if (g_popup_scroll > max_scroll) g_popup_scroll = max_scroll;
 
+    // While a list is open the arrows belong to it rather than to the
+    // focus, and resolve_focus() stands aside for exactly this. Enter
+    // takes whatever is highlighted and closes, Escape closes without
+    // taking anything.
+    //
+    // Only once the list has actually been on screen for a frame. Enter is
+    // also what opens a list from the keyboard, and without this the list
+    // would answer the very keypress that opened it and shut again in the
+    // same frame, which is precisely what it used to do.
+    const bool list_was_up = g_popup_shown_last;
+    const int sel = *g_pending.selected;
+    if (list_was_up && in.key_up && sel > 0) *g_pending.selected = sel - 1;
+    if (list_was_up && in.key_down && sel + 1 < static_cast<int>(options.size()))
+        *g_pending.selected = sel + 1;
+    if (list_was_up && (in.key_up || in.key_down)) {
+        // Keep the highlighted row in view, or arrowing past the eighth
+        // entry walks the selection somewhere nobody can see.
+        const float sel_y = row_h * static_cast<float>(*g_pending.selected);
+        if (sel_y < g_popup_scroll) g_popup_scroll = sel_y;
+        if (sel_y + row_h > g_popup_scroll + list_h) g_popup_scroll = sel_y + row_h - list_h;
+        if (g_popup_scroll < 0.0f) g_popup_scroll = 0.0f;
+        if (g_popup_scroll > max_scroll) g_popup_scroll = max_scroll;
+    }
+    if (list_was_up && (in.key_enter || in.key_escape)) open_dropdown_id = -1;
+
     draw_rect(popup.x, popup.y, popup.w, popup.h, palette::panel());
     draw_rect_outline(popup.x, popup.y, popup.w, popup.h, palette::accent());
 
@@ -503,7 +849,12 @@ void draw_open_dropdown_popup(const GuiInput& in, int& open_dropdown_id) {
 
         Rect row{popup.x, row_y, popup.w, row_h};
         bool hovered = rect_contains(row, in.mouse_x, in.mouse_y) && rect_contains(popup, in.mouse_x, in.mouse_y);
+        // The chosen row is marked as well as the hovered one now. Without
+        // it a list arrowed through from the keyboard gives no sign of
+        // where in itself you are.
         if (hovered) draw_rect(row.x, row.y, row.w, row.h, palette::border());
+        else if (static_cast<int>(i) == *g_pending.selected)
+            draw_rect(row.x, row.y, row.w, row.h, mix(palette::panel(), palette::border(), 0.5f));
         label(Rect{row.x + PAD, row.y, row.w - 2 * PAD, row.h}, options[i]);
         if (hovered && in.mouse_pressed) {
             *g_pending.selected = static_cast<int>(i);
@@ -582,10 +933,32 @@ constexpr float kModalPad = 22.0f;
 constexpr float kModalBtnW = 130.0f;
 constexpr float kModalBtnH = 32.0f;
 
+constexpr float kModalBodyLine = 24.0f;
+
+// A modal body used to be drawn as one unwrapped line, so anything much
+// past fifty characters ran off the box and onto the dimmed backdrop
+// behind it. It wraps now and the box grows to what it has to say, which
+// is what lets a body carry two facts instead of one.
+//
+// wrap_lines keeps an inner pad of its own, so the text sits a little
+// further in than the box padding alone would put it. That is a margin
+// rather than a mistake, and it is what keeps a long word clear of the
+// border.
+std::vector<std::string> modal_body_lines(const std::string& body) {
+    return wrap_lines(kModalW - 2 * kModalPad, body);
+}
+
+// One body line gives exactly the height every modal in here had before
+// wrapping existed, so nothing that already fitted has moved.
+float modal_box_height(int body_lines) {
+    return kModalPad * 2 + 34.0f + static_cast<float>(body_lines) * kModalBodyLine + 18.0f +
+           kModalBtnH;
+}
+
 // The dimmed sheet plus the box, shared by both modal shapes. Returns the
 // box so the caller can lay its own contents out inside it.
 Rect draw_modal_frame(float screen_w, float screen_h, const std::string& title,
-                      const std::string& body, float box_h) {
+                      const std::vector<std::string>& body_lines, float box_h) {
     g_in_modal = true;
     // The screen behind has already been drawn by the caller; this greys
     // it out so it reads as out of reach rather than merely unresponsive.
@@ -598,7 +971,10 @@ Rect draw_modal_frame(float screen_w, float screen_h, const std::string& title,
     float y = box.y + kModalPad;
     label(Rect{box.x + kModalPad, y, box.w - 2 * kModalPad, 26.0f}, title, false, Font::BodyLarge);
     y += 34.0f;
-    label(Rect{box.x + kModalPad, y, box.w - 2 * kModalPad, 24.0f}, body, true);
+    for (const std::string& line : body_lines) {
+        label(Rect{box.x + kModalPad, y, box.w - 2 * kModalPad, kModalBodyLine}, line, true);
+        y += kModalBodyLine;
+    }
     return box;
 }
 
@@ -607,8 +983,9 @@ Rect draw_modal_frame(float screen_w, float screen_h, const std::string& title,
 ModalChoice modal_question(float screen_w, float screen_h, const std::string& title,
                            const std::string& body, const std::string& confirm_text,
                            const std::string& cancel_text, const GuiInput& in) {
-    const float box_h = kModalPad * 2 + 34.0f + 24.0f + 18.0f + kModalBtnH;
-    Rect box = draw_modal_frame(screen_w, screen_h, title, body, box_h);
+    const std::vector<std::string> body_lines = modal_body_lines(body);
+    const float box_h = modal_box_height(static_cast<int>(body_lines.size()));
+    Rect box = draw_modal_frame(screen_w, screen_h, title, body_lines, box_h);
 
     float by = box.y + box_h - kModalPad - kModalBtnH;
     // Confirm on the right, the way a dialog that can lose you something
@@ -630,14 +1007,81 @@ ModalChoice modal_question(float screen_w, float screen_h, const std::string& ti
 
 bool modal_notice(float screen_w, float screen_h, const std::string& title,
                   const std::string& body, const GuiInput& in) {
-    const float box_h = kModalPad * 2 + 34.0f + 24.0f + 18.0f + kModalBtnH;
-    Rect box = draw_modal_frame(screen_w, screen_h, title, body, box_h);
+    const std::vector<std::string> body_lines = modal_body_lines(body);
+    const float box_h = modal_box_height(static_cast<int>(body_lines.size()));
+    Rect box = draw_modal_frame(screen_w, screen_h, title, body_lines, box_h);
 
     float by = box.y + box_h - kModalPad - kModalBtnH;
     Rect ok_r{box.x + box.w - kModalPad - kModalBtnW, by, kModalBtnW, kModalBtnH};
     bool ok = button(ok_r, "OK", in, true, true);
     g_in_modal = false;
     return ok || in.key_enter || in.key_escape;
+}
+
+// -- tooltips ------------------------------------------------------------
+
+const float kTooltipDelay = 1.0f;
+
+namespace {
+
+// How long the tooltip takes to fade up once the wait is over. Short
+// enough that it reads as already there by the time the eye arrives.
+constexpr float kTooltipFade = 0.12f;
+
+constexpr float kTooltipPad = 8.0f;
+// The gap between a control and its tooltip, so the two read as separate
+// things rather than as one taller control.
+constexpr float kTooltipGap = 6.0f;
+
+}  // namespace
+
+void tooltip(const Rect& r, const std::string& text, const GuiInput& in) {
+    if (text.empty()) return;
+    // Nothing special is needed to keep a tooltip from surfacing under a
+    // modal: gui.cpp draws the screen behind one with the pointer moved
+    // off the window, so no control back there is hovered at all.
+    WidgetMotion m = widget_motion(r, in);
+    if (m.hovered_for < kTooltipDelay) return;
+    g_tooltip.active = true;
+    g_tooltip.anchor = r;
+    g_tooltip.text = text;
+    g_tooltip.shown_for = m.hovered_for - kTooltipDelay;
+}
+
+void draw_pending_tooltip(float screen_w, float screen_h) {
+    if (!g_tooltip.active) return;
+
+    float tw = text_width(Font::Body, g_tooltip.text);
+    float th = text_line_height(Font::Body);
+    float w = tw + kTooltipPad * 2.0f;
+    float h = th + kTooltipPad * 2.0f;
+
+    // Under the control and aligned with its left edge, so it holds still
+    // while the pointer wanders about inside the control. Flipped above
+    // when there is no room below, and pulled back inside the window when
+    // a control near the right edge would otherwise push it out.
+    float x = g_tooltip.anchor.x;
+    float y = g_tooltip.anchor.y + g_tooltip.anchor.h + kTooltipGap;
+    if (y + h > screen_h) y = g_tooltip.anchor.y - kTooltipGap - h;
+    if (x + w > screen_w) x = screen_w - w;
+    if (x < 0.0f) x = 0.0f;
+    if (y < 0.0f) y = 0.0f;
+
+    float a = motion_enabled() ? std::clamp(g_tooltip.shown_for / kTooltipFade, 0.0f, 1.0f) : 1.0f;
+
+    // Lifted off the panel colour rather than drawn in it, because the
+    // thing a tooltip most often sits on is a panel, and a box the same
+    // colour as its background is only an outline.
+    Color bg = mix(palette::panel(), palette::border(), 0.30f);
+    bg.a = a;
+    Color edge = palette::border();
+    edge.a = a;
+    Color fg = palette::text();
+    fg.a = a;
+
+    draw_rect(x, y, w, h, bg);
+    draw_rect_outline(x, y, w, h, edge);
+    draw_text(Font::Body, x + kTooltipPad, y + (h + th * 0.7f) * 0.5f, g_tooltip.text, fg);
 }
 
 }  // namespace gui

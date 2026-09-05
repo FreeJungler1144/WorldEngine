@@ -208,7 +208,6 @@ void EncipheringPanel::frame(const GuiInput& in, int width, int height) {
     wordmark_clicked_ = false;
 
     float w = static_cast<float>(width), h = static_cast<float>(height);
-    clear(palette::background());
 
     float top = draw_header(in, w);
 

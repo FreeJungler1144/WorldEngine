@@ -1,0 +1,29 @@
+# Arrow key navigation, with no pointer anywhere near the window.
+#
+# The pointer is parked off screen on purpose, so nothing here can be a
+# hover. First press lands on Back, then Colour vision, then Display mode.
+# Enter opens that list, Down moves the highlight, Enter takes it.
+wait 0.5
+move 960 595
+wait 0.3
+click
+wait 0.7
+move -5000 -5000
+key down
+wait 0.3
+shot focus-first
+key down
+wait 0.2
+key down
+wait 0.3
+shot focus-moved
+key enter
+wait 0.5
+shot list-open
+key down
+wait 0.3
+shot list-arrowed
+key enter
+wait 0.4
+shot list-taken
+quit

@@ -1318,6 +1318,13 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         if (a == "--no-color") g_color = false;
     }
+    // Test only. Fills the GUIs input struct from a file instead of from
+    // the pointer and the keyboard, so the window can be driven and
+    // photographed without anything touching the operators cursor. The
+    // window is still real and still visible. See gui_script.hpp.
+    std::string gui_script;
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--gui-script") gui_script = argv[i + 1];
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--self-test" || a == "-t") { banner(); rule("self-test"); return self_test(); }
@@ -1325,7 +1332,8 @@ int main(int argc, char** argv) {
             banner();
             std::cout << "\n  inop              interactive session\n"
                       << "  inop --self-test  run correctness and speed checks\n"
-                      << "  inop --no-color   plain output, no ANSI\n\n";
+                      << "  inop --no-color   plain output, no ANSI\n"
+                      << "  inop --gui-script <file>  drive the window from a script\n\n";
             return 0;
         }
     }
@@ -1404,7 +1412,7 @@ int main(int argc, char** argv) {
     // seeing it. A CLI-only build has no window to open and says nothing,
     // it simply lands on the menu below.
     if (gui_available()) {
-        if (run_gui_settings() == GuiExit::Quit) {
+        if (run_gui_settings(gui_script) == GuiExit::Quit) {
             std::cout << DIM << "  closed.\n" << RST;
             return 0;
         }

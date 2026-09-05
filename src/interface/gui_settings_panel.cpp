@@ -233,7 +233,6 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
 
     float w = static_cast<float>(width), h = static_cast<float>(height);
     begin_widget_frame();
-    clear(palette::background());
 
     // Whatever the popup wrote into the indices last frame becomes the
     // pending preferences before anything reads them, so the Apply button
@@ -289,7 +288,13 @@ void SettingsPanel::frame(const GuiInput& in, int width, int height) {
     float by = footer_top + kSectionGap;
 
     bool dirty = pending_ != applied_;
-    if (button(Rect{x, by, kBtnW, kBtnH}, "Apply", in, dirty, true)) apply_pending_ = true;
+    Rect apply_r{x, by, kBtnW, kBtnH};
+    if (button(apply_r, "Apply", in, dirty, true)) apply_pending_ = true;
+    // The only tooltip in the interface so far, and here to be looked at
+    // rather than because Apply is hard to follow. Everybody knows what
+    // Apply does; the point is to see the wait, the placement and the fade
+    // on something harmless before deciding where these belong.
+    tooltip(apply_r, "Puts these settings in force and saves them to inop.gui.json", in);
 
     bool at_defaults = pending_ == GuiPrefs{};
     if (button(Rect{x + kBtnW + kRowGap, by, kWideBtnW, kBtnH}, "Reset to default", in,
@@ -407,8 +412,9 @@ float SettingsPanel::draw_graphics(const GuiInput& in, float x, float y) {
                            "% the panels do not fit a window this size yet");
     y += kRowH + kRowGap;
 
-    row_label(x, y, "Reduced motion", true);
-    toggle(control_rect(x, y), reduced_motion_, "nothing animates yet", in, false);
+    row_label(x, y, "Reduced motion", false);
+    toggle(control_rect(x, y), pending_.reduced_motion, "no dips, no fades, nothing travels", in,
+           true);
     y += kRowH;
 
     return y;

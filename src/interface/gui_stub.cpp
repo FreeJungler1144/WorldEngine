@@ -9,7 +9,7 @@ namespace inop {
 
 bool gui_available() { return false; }
 
-GuiExit run_gui_settings() {
+GuiExit run_gui_settings(const std::string& /*script_path*/) {
     std::cout << "  this build has no GUI support "
                  "(configure with -DINOP_WITH_GUI=ON and a vcpkg toolchain file)\n";
     // Terminal, not Quit: reaching here means the operator asked for the

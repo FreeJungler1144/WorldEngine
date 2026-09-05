@@ -60,7 +60,7 @@ roadmap from the word file
 INOP braindump
 
 user login and account setup – circular image button top right (may be merged with settings, experimental)
-animations – button dip, button highlight, swipe motion changing between panels, /not a finished list/
+animations – button dip, button highlight, swipe motion changing between panels, dropdown list goes behind the cover (currently top part overlays the cover) + animated to roll out instead of snap to full length), /not a finished list/
 audio effects – on button click, background music, inop in progress, text to speech
 on button hover, small pop up for what the user is looking at if ambiguous
 tutorial on first launch (maybe) with focus mode (available clciks/enter only on intended parts of screen until tutorial ends), option to replay tutorial in the settings, option to skip tutorial on first launch
@@ -68,20 +68,14 @@ because the inop is so fast at encrypting and decrypting and I want animations t
 language overhaul -> instead of per language tables we have a simple list which will transform every character into parsable input for INOP and enigma (enigma experimental, inop focused)
 0 capitalize the character, 1 apply macron, 2 apply rising ´, 3 apply falling rising, 31 apply bevel (smooth falling rising), 4 apply falling, … (ask specific table during planning). Appended to the end of message between actual end of message and marker
 search bar
-console window hidden on gui launch – the cli stays the host and keeps running, its console window just goes away: ShowWindow(GetConsoleWindow(), SW_HIDE), so it is absent from alt tab and from the taskbar and only findable in task manager. show it again on the way back out to the cli menu, which is what makes the terminal button nearly free since the operation is symmetric and nothing has to be spawned or relaunched. guard it with GetConsoleProcessList(): one process attached means inop created that console and owns it, more than one means it was launched from an existing shell and must be left alone, which is also what keeps inop --self-test printing normally. tradeoff accepted: the console still exists at process start so there is a brief flash before it is hidden, avoiding that flash needs -mwindows subsystem linking and the whole gui-as-host restructure instead. windows only, no console subsystem concept on linux. roughly 25 lines behind a `_WIN32` guard in gui.cpp and main.cpp
-
+console window hidden on gui launch
 
 settings
 keybind list 
 interface font – Courier, Times New Roman, Crimson Pro, SGA all characters (I have a zip file, needs a license and credits mentioned most likely), Grandwiew, Harlow solid italic, (for now, perhaps “add your own” as last entry from list which opens the font folder), default to courier
 interface language – however many i support, currently concretely „english“ (also the default
 INOP script – latin, greek, cyrillic, hebrew, hangul (for now), default to latin
-colour vision – full, protanopia (red weak), deutanotropia (green weak), tritanotopia (blue weak), achromatopia (greyscale), default to full
 arachnophobia mode – sacred supreme setting, removal from the setting panel bricks the entire app (im serious), default to off
-display mode – fullscreen, borderless, windowed (resizable window, no resolution choice however, default to borderless)
-app mode – system setting, light, dark (default on system setting)
-interface scale – 50 70 80 90 100 110 120 135 150 175 200 default to 100%
-apply changes, reset to default buttons snap to bottom of settings panel
 
 strip all comments at all times (I know its stupid)
 
@@ -91,6 +85,3 @@ installer uninstaller
 bombe 
 actual art for the gui
 future things I didn’t think of yet
-
-
-

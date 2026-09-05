@@ -1,0 +1,9 @@
+# Opens the window, photographs the main menu, closes it again.
+# The shortest proof that --gui-script works at all.
+#
+# Coordinates in every script here are logical units for a 1920 by 1080
+# window at 100 percent zoom. A different window or zoom moves them.
+wait 0.6
+shot main-menu
+wait 0.2
+quit
